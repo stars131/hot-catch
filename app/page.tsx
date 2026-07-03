@@ -30,7 +30,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import {
-  HotspotOpportunityPanel,
   HotspotRadarDashboard,
   filterHotspotsByPlatform,
   hotspotTopics,
@@ -640,19 +639,6 @@ export default function HomePage() {
     if (firstTopic) setSelectedHotspotId(firstTopic.id);
   }
 
-  async function generateHotspotTopic(angleTitle?: string) {
-    const prompt = angleTitle
-      ? `/content 围绕热点「${selectedHotspot.title}」，角度「${angleTitle}」，生成一篇小红书图文选题、标题和正文草稿`
-      : `/content 围绕热点「${selectedHotspot.title}」生成 3 个小红书选题方向，并给出最推荐的一篇正文草稿`;
-    setWorkspaceMode("chat");
-    await sendMessage(prompt);
-  }
-
-  async function addHotspotBenchmark() {
-    setWorkspaceMode("chat");
-    await sendMessage(`把热点「${selectedHotspot.title}」加入对标分析，拆解代表账号、内容结构和可复用选题角度`);
-  }
-
   return (
     <main
       className={cn(
@@ -702,6 +688,7 @@ export default function HomePage() {
             selectedCount={selectedAccounts.length}
             onOpenSidebar={() => setMobileSidebarOpen(true)}
             onToggleInspector={() => setInspectorOpen((open) => !open)}
+            showInspectorToggle={workspaceMode === "chat"}
           />
 
           <div className="flex min-h-0 flex-1">
@@ -721,15 +708,7 @@ export default function HomePage() {
                   onPlatformChange={handleHotspotPlatformChange}
                   onWindowChange={setHotspotWindow}
                   onSelectHotspot={setSelectedHotspotId}
-                  onGenerateTopic={(angleTitle) => void generateHotspotTopic(angleTitle)}
-                  onAddBenchmark={() => void addHotspotBenchmark()}
                   onRefresh={() => void loadHotspots(true)}
-                />
-                <HotspotOpportunityPanel
-                  open={inspectorOpen}
-                  selectedHotspot={selectedHotspot}
-                  onGenerateTopic={(angleTitle) => void generateHotspotTopic(angleTitle)}
-                  onAddBenchmark={() => void addHotspotBenchmark()}
                 />
               </>
             ) : (
@@ -842,15 +821,15 @@ function ChatSidebar(props: {
           <WorkspaceSwitchButton
             active={props.workspaceMode === "hotspots"}
             icon={<BarChart3 className="h-4 w-4" />}
-            label="热点雷达"
-            description="趋势、榜单、机会角度"
+            label="热点信息"
+            description="趋势、榜单、来源状态"
             onClick={() => props.onWorkspaceModeChange("hotspots")}
           />
           <WorkspaceSwitchButton
             active={props.workspaceMode === "chat"}
             icon={<MessageSquare className="h-4 w-4" />}
-            label="创作对话"
-            description="账号分析、图文生成"
+            label="小红书创作"
+            description="对标分析、图文生成"
             onClick={() => props.onWorkspaceModeChange("chat")}
           />
         </div>
@@ -1014,6 +993,7 @@ function TopBar(props: {
   selectedCount: number;
   onOpenSidebar: () => void;
   onToggleInspector: () => void;
+  showInspectorToggle: boolean;
 }) {
   const cyber = props.tone === "hotspots";
 
@@ -1047,20 +1027,22 @@ function TopBar(props: {
         <IconButton label="分享" cyber={cyber} icon={<Share2 className="h-4 w-4" />} />
         <IconButton label="历史" cyber={cyber} icon={<History className="h-4 w-4" />} />
         <IconButton label="设置" cyber={cyber} icon={<Settings className="h-4 w-4" />} />
-        <button
-          type="button"
-          onClick={props.onToggleInspector}
-          data-testid="toggle-inspector"
-          className={cn(
-            "inline-flex h-8 w-8 items-center justify-center rounded-md border",
-            cyber
-              ? "border-cyan-300/25 bg-[#0b1220] text-cyan-200 hover:bg-cyan-300/10"
-              : "border-[#dedbd4] bg-white text-[#5f5a54] hover:bg-[#f4f3ef]"
-          )}
-          aria-label="切换右侧面板"
-        >
-          <PanelRight className="h-4 w-4" />
-        </button>
+        {props.showInspectorToggle ? (
+          <button
+            type="button"
+            onClick={props.onToggleInspector}
+            data-testid="toggle-inspector"
+            className={cn(
+              "inline-flex h-8 w-8 items-center justify-center rounded-md border",
+              cyber
+                ? "border-cyan-300/25 bg-[#0b1220] text-cyan-200 hover:bg-cyan-300/10"
+                : "border-[#dedbd4] bg-white text-[#5f5a54] hover:bg-[#f4f3ef]"
+            )}
+            aria-label="切换右侧面板"
+          >
+            <PanelRight className="h-4 w-4" />
+          </button>
+        ) : null}
       </div>
     </header>
   );

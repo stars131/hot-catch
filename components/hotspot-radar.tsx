@@ -2,7 +2,6 @@
 
 import {
   Activity,
-  AlertTriangle,
   ArrowDownRight,
   ArrowUpRight,
   Bookmark,
@@ -470,8 +469,6 @@ export function HotspotRadarDashboard(props: {
   onPlatformChange: (platform: HotspotPlatform) => void;
   onWindowChange: (window: HotspotWindow) => void;
   onSelectHotspot: (id: string) => void;
-  onGenerateTopic: (angleTitle?: string) => void;
-  onAddBenchmark: () => void;
   onRefresh?: () => void;
 }) {
   const topics = props.topics?.length ? props.topics : hotspotTopics;
@@ -587,120 +584,8 @@ export function HotspotRadarDashboard(props: {
             <TrendDetail selectedHotspot={selectedHotspot} />
           </Panel>
         </div>
-
-        <MobileOpportunitySummary selectedHotspot={selectedHotspot} onGenerateTopic={props.onGenerateTopic} />
       </div>
     </section>
-  );
-}
-
-export function HotspotOpportunityPanel(props: {
-  open: boolean;
-  selectedHotspot: HotspotTopic;
-  onGenerateTopic: (angleTitle?: string) => void;
-  onAddBenchmark: () => void;
-}) {
-  const selected = props.selectedHotspot;
-
-  return (
-    <aside
-      className={cn(
-        "hidden w-[360px] shrink-0 border-l border-cyan-300/15 bg-[#070b13] text-slate-100 xl:flex xl:flex-col",
-        !props.open && "xl:hidden"
-      )}
-      data-testid="hotspot-opportunity-panel"
-    >
-      <div className="flex h-14 items-center justify-between border-b border-cyan-300/15 px-4">
-        <div>
-          <p className="text-sm font-semibold text-white">机会角度</p>
-          <p className="text-[11px] text-slate-500">围绕「{selected.title}」生成可行动方向</p>
-        </div>
-        <Target className="h-4 w-4 text-cyan-300" />
-      </div>
-
-      <div className="thin-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
-        {selected.angles.map((angle, index) => (
-          <button
-            key={angle.title}
-            type="button"
-            onClick={() => props.onGenerateTopic(angle.title)}
-            className="w-full border border-cyan-300/15 bg-[#0b1220] p-3 text-left transition hover:border-cyan-300/45 hover:bg-[#0e182b]"
-          >
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="text-[11px] font-semibold text-slate-400">角度 {index + 1}</span>
-              <StatusPill status={angle.status} />
-            </div>
-            <h3 className="text-sm font-semibold text-white">{angle.title}</h3>
-            <p className="mt-2 text-xs leading-5 text-slate-400">{angle.description}</p>
-            <div className="mt-3">
-              <div className="mb-1 flex items-center justify-between text-[11px]">
-                <span className="text-slate-500">预测热度</span>
-                <span className="font-semibold text-cyan-200">{angle.heat}</span>
-              </div>
-              <div className="h-1.5 bg-slate-800">
-                <div className="h-full bg-gradient-to-r from-cyan-300 to-[#b6ff3b]" style={{ width: `${angle.heat}%` }} />
-              </div>
-            </div>
-          </button>
-        ))}
-
-        <div className="border border-amber-300/30 bg-amber-300/5 p-3">
-          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-amber-200">
-            <AlertTriangle className="h-4 w-4" />
-            风险提示
-          </div>
-          <ul className="space-y-1.5 text-xs leading-5 text-amber-100/75">
-            {selected.riskNotes.map((note) => (
-              <li key={note}>· {note}</li>
-            ))}
-          </ul>
-        </div>
-
-        {selected.sources?.length ? (
-          <div className="border border-cyan-300/15 bg-[#0b1220] p-3">
-            <p className="mb-2 text-xs font-semibold text-slate-400">原始来源</p>
-            <div className="space-y-2">
-              {selected.sources.slice(0, 5).map((source) => (
-                <a
-                  key={source.id}
-                  href={source.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block border border-slate-800 bg-[#070b13] p-2 text-xs transition hover:border-cyan-300/35 hover:bg-[#0c1726]"
-                >
-                  <span className="mb-1 flex items-center justify-between gap-2">
-                    <span className="font-semibold text-cyan-200">{source.platform}</span>
-                    <span className="text-slate-500">#{source.rank}</span>
-                  </span>
-                  <span className="line-clamp-2 leading-5 text-slate-300">{source.title}</span>
-                  {source.rawScore && <span className="mt-1 block text-[11px] text-slate-500">热度：{source.rawScore}</span>}
-                </a>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        <div className="space-y-2">
-          <p className="text-xs font-semibold text-slate-400">推荐动作</p>
-          <button
-            type="button"
-            onClick={() => props.onGenerateTopic()}
-            className="inline-flex h-10 w-full items-center justify-center gap-2 border border-[#ff2bd6] bg-[#ff2bd6]/12 text-sm font-semibold text-[#ff7be9] hover:bg-[#ff2bd6]/20"
-          >
-            <Zap className="h-4 w-4" />
-            生成选题
-          </button>
-          <button
-            type="button"
-            onClick={props.onAddBenchmark}
-            className="inline-flex h-10 w-full items-center justify-center gap-2 border border-cyan-300/70 bg-cyan-300/10 text-sm font-semibold text-cyan-200 hover:bg-cyan-300/20"
-          >
-            <Target className="h-4 w-4" />
-            加入对标
-          </button>
-        </div>
-      </div>
-    </aside>
   );
 }
 
@@ -1181,36 +1066,6 @@ function DonutChart(props: { items: HotspotTopic["platformShare"] }) {
       })}
       <circle cx="50" cy="50" r="22" fill="#0b1220" />
     </svg>
-  );
-}
-
-function MobileOpportunitySummary(props: {
-  selectedHotspot: HotspotTopic;
-  onGenerateTopic: (angleTitle?: string) => void;
-}) {
-  return (
-    <section className="border border-cyan-300/15 bg-[#08111d] p-4 xl:hidden">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold text-white">机会角度</h3>
-          <p className="text-xs text-slate-500">移动端摘要：{props.selectedHotspot.title}</p>
-        </div>
-        <Target className="h-4 w-4 text-cyan-300" />
-      </div>
-      <div className="grid gap-3 md:grid-cols-3">
-        {props.selectedHotspot.angles.map((angle) => (
-          <button
-            key={angle.title}
-            type="button"
-            onClick={() => props.onGenerateTopic(angle.title)}
-            className="border border-cyan-300/15 bg-[#0b1220] p-3 text-left hover:border-cyan-300/45"
-          >
-            <p className="text-sm font-semibold text-white">{angle.title}</p>
-            <p className="mt-2 line-clamp-3 text-xs leading-5 text-slate-400">{angle.description}</p>
-          </button>
-        ))}
-      </div>
-    </section>
   );
 }
 
