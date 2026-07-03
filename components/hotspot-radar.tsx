@@ -32,9 +32,31 @@ export type HotspotPlatform =
   | "Hacker News"
   | "掘金"
   | "少数派"
+  | "快手"
+  | "贴吧"
+  | "澎湃新闻"
+  | "IT之家"
+  | "网易新闻"
+  | "腾讯新闻"
+  | "36氪"
+  | "虎扑"
+  | "V2EX"
+  | "HelloGitHub"
+  | "360搜索"
+  | "搜狗"
+  | "新浪"
+  | "豆瓣电影"
   | "技术圈";
 export type HotspotWindow = "1小时" | "24小时" | "7天";
 export type HotspotStatus = "爆发中" | "上升" | "回落" | "观望";
+
+export type HotspotProjectReference = {
+  repo: string;
+  url: string;
+  role: "api-backend" | "source-map" | "algorithm" | "monitoring" | "domain-feed";
+  notes: string;
+  influence: string;
+};
 
 export type HotspotSourceItem = {
   id: string;
@@ -43,16 +65,18 @@ export type HotspotSourceItem = {
   score: number;
   rawScore: string;
   desc: string;
-  platform: Exclude<HotspotPlatform, "全平台" | "小红书" | "技术圈">;
+  platform: Exclude<HotspotPlatform, "全平台" | "技术圈">;
   platformCode: string;
   rank: number;
+  backend?: string;
 };
 
 export type HotspotSourceHealth = {
-  platform: Exclude<HotspotPlatform, "全平台" | "小红书" | "技术圈">;
+  platform: Exclude<HotspotPlatform, "全平台" | "技术圈">;
   platformCode: string;
   ok: boolean;
   count: number;
+  backend?: string;
   message?: string;
 };
 
@@ -426,8 +450,8 @@ export function filterHotspotsByPlatform(platform: HotspotPlatform, topics = hot
     : platform === "技术圈"
       ? topics.filter((topic) =>
           topic.sources?.some((source) =>
-            ["github", "hackernews", "juejin", "sspai"].includes(source.platformCode)
-          ) || ["GitHub", "Hacker News", "掘金", "少数派"].includes(topic.platform)
+            ["github", "hackernews", "juejin", "sspai", "v2ex", "hellogithub", "ithome", "36kr"].includes(source.platformCode)
+          ) || ["GitHub", "Hacker News", "掘金", "少数派", "V2EX", "HelloGitHub", "IT之家", "36氪"].includes(topic.platform)
         )
       : topics.filter((topic) => topic.platform === platform || topic.platformShare.some((share) => share.label === platform));
 }
@@ -439,6 +463,7 @@ export function HotspotRadarDashboard(props: {
   topics?: HotspotTopic[];
   platforms?: HotspotPlatform[];
   sourceHealth?: HotspotSourceHealth[];
+  projectReferences?: HotspotProjectReference[];
   generatedAt?: string;
   loading?: boolean;
   error?: string | null;
@@ -458,6 +483,7 @@ export function HotspotRadarDashboard(props: {
   const averageHeat =
     visibleTopics.reduce((sum, topic) => sum + topic.heat, 0) / Math.max(visibleTopics.length, 1);
   const activeSourceCount = props.sourceHealth?.filter((source) => source.ok).length ?? 0;
+  const projectReferenceCount = props.projectReferences?.length ?? 0;
   const generatedAt = props.generatedAt
     ? new Intl.DateTimeFormat("zh-CN", {
         hour: "2-digit",
@@ -477,7 +503,7 @@ export function HotspotRadarDashboard(props: {
             <div className="min-w-0">
               <h2 className="truncate text-lg font-semibold tracking-normal text-white">热点雷达</h2>
               <p className="truncate text-xs text-slate-400">
-                数据更新：{generatedAt} · {activeSourceCount || props.sourceHealth?.length || 0} 个来源在线 · orz.ai + 本地聚类
+                数据更新：{generatedAt} · {activeSourceCount || props.sourceHealth?.length || 0} 个来源在线 · {projectReferenceCount || 20} 个开源项目接入
               </p>
             </div>
           </div>
@@ -515,6 +541,7 @@ export function HotspotRadarDashboard(props: {
         )}
 
         {props.sourceHealth?.length ? <SourceHealthStrip sources={props.sourceHealth} /> : null}
+        {props.projectReferences?.length ? <ProjectReferenceStrip projects={props.projectReferences} /> : null}
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4">
           <MetricCard
@@ -771,7 +798,7 @@ function SourceHealthStrip(props: { sources: HotspotSourceHealth[] }) {
         {props.sources.map((source) => (
           <span
             key={source.platformCode}
-            title={source.message}
+            title={source.message ?? source.backend}
             className={cn(
               "inline-flex h-7 shrink-0 items-center gap-1.5 border px-2 text-[11px] font-medium",
               source.ok
@@ -782,7 +809,46 @@ function SourceHealthStrip(props: { sources: HotspotSourceHealth[] }) {
             <span className={cn("h-1.5 w-1.5", source.ok ? "bg-[#b6ff3b]" : "bg-amber-300")} />
             {source.platform}
             <span className="text-slate-500">{source.count}</span>
+            {source.backend ? <span className="max-w-[92px] truncate text-slate-600">{source.backend}</span> : null}
           </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProjectReferenceStrip(props: { projects: HotspotProjectReference[] }) {
+  const apiCount = props.projects.filter((project) => project.role === "api-backend").length;
+  const sourceCount = props.projects.filter((project) => project.role === "source-map").length;
+  const domainCount = props.projects.filter((project) => project.role === "domain-feed").length;
+
+  return (
+    <div className="grid gap-2 md:grid-cols-[180px_1fr]">
+      <div className="border border-cyan-300/15 bg-[#08111d] px-3 py-2">
+        <p className="text-[11px] font-semibold text-slate-500">开源项目接入</p>
+        <p className="mt-1 text-sm font-semibold text-white">
+          {props.projects.length} 个项目 · {apiCount} 个 API
+        </p>
+      </div>
+      <div className="thin-scrollbar flex gap-2 overflow-x-auto border border-cyan-300/15 bg-[#08111d] p-2">
+        <span className="inline-flex h-7 shrink-0 items-center border border-[#b6ff3b]/30 bg-[#b6ff3b]/8 px-2 text-[11px] font-medium text-[#d8ff92]">
+          {sourceCount} 个源表
+        </span>
+        <span className="inline-flex h-7 shrink-0 items-center border border-[#ff2bd6]/30 bg-[#ff2bd6]/8 px-2 text-[11px] font-medium text-[#ff9bea]">
+          {domainCount} 个垂直趋势
+        </span>
+        {props.projects.map((project) => (
+          <a
+            key={project.repo}
+            href={project.url}
+            target="_blank"
+            rel="noreferrer"
+            title={project.influence}
+            className="inline-flex h-7 shrink-0 items-center gap-1.5 border border-slate-700 bg-slate-900/80 px-2 text-[11px] font-medium text-slate-300 transition hover:border-cyan-300/45 hover:text-cyan-100"
+          >
+            <span className="h-1.5 w-1.5 bg-cyan-300" />
+            {project.repo}
+          </a>
         ))}
       </div>
     </div>

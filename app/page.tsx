@@ -35,6 +35,7 @@ import {
   filterHotspotsByPlatform,
   hotspotTopics,
   type HotspotPlatform,
+  type HotspotProjectReference,
   type HotspotSourceHealth,
   type HotspotTopic,
   type HotspotWindow,
@@ -125,10 +126,13 @@ type HotspotPayload = {
   platforms: HotspotPlatform[];
   topics: HotspotTopic[];
   sourceHealth: HotspotSourceHealth[];
+  projectReferences: HotspotProjectReference[];
   summary: {
     totalItems: number;
     activeSources: number;
     crossPlatformTopics: number;
+    backendCount: number;
+    projectReferenceCount: number;
     source: string;
   };
 };
@@ -710,6 +714,7 @@ export default function HomePage() {
                   topics={hotspotPayload?.topics}
                   platforms={hotspotPayload?.platforms}
                   sourceHealth={hotspotPayload?.sourceHealth}
+                  projectReferences={hotspotPayload?.projectReferences}
                   generatedAt={hotspotPayload?.generatedAt}
                   loading={hotspotLoading}
                   error={hotspotError}

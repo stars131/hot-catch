@@ -8,7 +8,22 @@ export type HotspotPlatformCode =
   | "github"
   | "hackernews"
   | "juejin"
-  | "sspai";
+  | "sspai"
+  | "kuaishou"
+  | "tieba"
+  | "thepaper"
+  | "ithome"
+  | "netease-news"
+  | "qq-news"
+  | "36kr"
+  | "hupu"
+  | "v2ex"
+  | "hellogithub"
+  | "xiaohongshu"
+  | "so360"
+  | "sogou"
+  | "sina"
+  | "douban-movie";
 
 export type HotspotPlatformLabel =
   | "百度"
@@ -20,9 +35,32 @@ export type HotspotPlatformLabel =
   | "GitHub"
   | "Hacker News"
   | "掘金"
-  | "少数派";
+  | "少数派"
+  | "快手"
+  | "贴吧"
+  | "澎湃新闻"
+  | "IT之家"
+  | "网易新闻"
+  | "腾讯新闻"
+  | "36氪"
+  | "虎扑"
+  | "V2EX"
+  | "HelloGitHub"
+  | "小红书"
+  | "360搜索"
+  | "搜狗"
+  | "新浪"
+  | "豆瓣电影";
 
 export type HotspotStatus = "爆发中" | "上升" | "回落" | "观望";
+
+export type HotspotProjectReference = {
+  repo: string;
+  url: string;
+  role: "api-backend" | "source-map" | "algorithm" | "monitoring" | "domain-feed";
+  notes: string;
+  influence: string;
+};
 
 export type HotspotSourceItem = {
   id: string;
@@ -34,6 +72,7 @@ export type HotspotSourceItem = {
   platform: HotspotPlatformLabel;
   platformCode: HotspotPlatformCode;
   rank: number;
+  backend: string;
 };
 
 export type HotspotTopic = {
@@ -63,6 +102,7 @@ export type HotspotSourceHealth = {
   platformCode: HotspotPlatformCode;
   ok: boolean;
   count: number;
+  backend: string;
   message?: string;
 };
 
@@ -71,27 +111,15 @@ export type HotspotPayload = {
   platforms: Array<"全平台" | HotspotPlatformLabel | "技术圈">;
   topics: HotspotTopic[];
   sourceHealth: HotspotSourceHealth[];
+  projectReferences: HotspotProjectReference[];
   summary: {
     totalItems: number;
     activeSources: number;
     crossPlatformTopics: number;
+    backendCount: number;
+    projectReferenceCount: number;
     source: string;
   };
-};
-
-type OrzDailyNewsItem = {
-  title?: string;
-  url?: string;
-  score?: string | number;
-  hot?: string | number;
-  desc?: string;
-  content?: string;
-};
-
-type OrzDailyNewsResponse = {
-  status?: string | number;
-  data?: OrzDailyNewsItem[];
-  msg?: string;
 };
 
 type HotspotSource = {
@@ -100,6 +128,48 @@ type HotspotSource = {
   category: string;
   color: string;
   weight: number;
+  orzPlatform?: string;
+  dailyHotRoute?: string;
+  sixtyRoute?: string;
+  nativeFetcher?: (source: HotspotSource) => Promise<HotspotSourceItem[]>;
+};
+
+type GenericHotItem = {
+  title?: string;
+  name?: string;
+  word?: string;
+  keyword?: string;
+  query?: string;
+  url?: string;
+  link?: string;
+  mobileUrl?: string;
+  href?: string;
+  desc?: string;
+  description?: string;
+  content?: string;
+  abstract?: string;
+  score?: string | number;
+  hot?: string | number;
+  hot_value?: string | number;
+  hotValue?: string | number;
+  heat?: string | number;
+  views?: string | number;
+  view?: string | number;
+  interactionNum?: string | number;
+  discuss_num?: string | number;
+  replies?: string | number;
+  rate?: string | number;
+};
+
+type GenericHotResponse = {
+  status?: string | number;
+  code?: string | number;
+  msg?: string;
+  message?: string;
+  data?: unknown;
+  result?: unknown;
+  news?: unknown;
+  list?: unknown;
 };
 
 type TopicCluster = {
@@ -112,22 +182,183 @@ type TopicCluster = {
 };
 
 const HOTSPOT_CACHE_MS = 5 * 60 * 1000;
+const REQUEST_TIMEOUT_MS = 6500;
 const ORZ_DAILY_NEWS_ENDPOINTS = [
   "https://orz.ai/api/v1/dailynews/",
   "https://news.orz.ai/api/v1/dailynews/",
 ];
+const DAILY_HOT_API_BASE = "https://api-hot.imsyy.top";
+const SIXTY_SECONDS_BASE = "https://60s.viki.moe/v2";
+
+export const HOTSPOT_PROJECT_REFERENCES: HotspotProjectReference[] = [
+  {
+    repo: "imsyy/DailyHotApi",
+    url: "https://github.com/imsyy/DailyHotApi",
+    role: "api-backend",
+    notes: "提供大量中文平台 route，适合作为 orz.ai 之外的 API 后备。",
+    influence: "接入 DailyHotApi route 命名、通用响应归一化和多平台源表。",
+  },
+  {
+    repo: "vikiboss/60s",
+    url: "https://github.com/vikiboss/60s",
+    role: "api-backend",
+    notes: "公开 60s API，微博、知乎、抖音、百度等接口稳定返回。",
+    influence: "接入 60s 公开接口作为强后备通道。",
+  },
+  {
+    repo: "joyce677/TrendRadar",
+    url: "https://github.com/joyce677/TrendRadar",
+    role: "algorithm",
+    notes: "用配置化平台、权重和报告生成组织热点。",
+    influence: "保留平台权重、跨平台聚类和选题角度生成。",
+  },
+  {
+    repo: "tophubs/TopList",
+    url: "https://github.com/tophubs/TopList",
+    role: "source-map",
+    notes: "今日热榜的经典多源抓取项目。",
+    influence: "扩展平台覆盖，并按平台健康度显示抓取状态。",
+  },
+  {
+    repo: "uxiaohan/HotList-Web",
+    url: "https://github.com/uxiaohan/HotList-Web",
+    role: "source-map",
+    notes: "聚合式热点 Web 项目。",
+    influence: "参考热点列表、平台过滤和一屏聚合展示。",
+  },
+  {
+    repo: "LoseNine/TopList-python",
+    url: "https://github.com/LoseNine/TopList-python",
+    role: "source-map",
+    notes: "Python 版热榜聚合实现。",
+    influence: "补充多语言项目里的榜单归一化思路。",
+  },
+  {
+    repo: "ieliwb/tophub-api",
+    url: "https://github.com/ieliwb/tophub-api",
+    role: "api-backend",
+    notes: "TopHub API 使用手册与接口整理。",
+    influence: "沉淀 route registry，方便继续替换或增加 API 后端。",
+  },
+  {
+    repo: "fancyboi999/daily-hot-mcp",
+    url: "https://github.com/fancyboi999/daily-hot-mcp",
+    role: "api-backend",
+    notes: "MCP 化的 daily-hot 服务，列出 30 多个来源和原生接口。",
+    influence: "接入微博、知乎、B站、HN、GitHub 等原生后备抓取。",
+  },
+  {
+    repo: "one-box-u/openclaw-daily-hot-news",
+    url: "https://github.com/one-box-u/openclaw-daily-hot-news",
+    role: "source-map",
+    notes: "OpenClaw 热点技能，覆盖数十个平台。",
+    influence: "补充快手、虎扑、V2EX、HelloGitHub 等长尾来源。",
+  },
+  {
+    repo: "BACH-AI-Tools/hot-news-bachstudio",
+    url: "https://github.com/BACH-AI-Tools/hot-news-bachstudio",
+    role: "api-backend",
+    notes: "MCP 热点新闻服务。",
+    influence: "参考工具化输出和可解释来源描述。",
+  },
+  {
+    repo: "zbw-zbw/news-aggregator",
+    url: "https://github.com/zbw-zbw/news-aggregator",
+    role: "domain-feed",
+    notes: "技术新闻聚合方向。",
+    influence: "强化 GitHub、Hacker News、掘金、V2EX 技术圈过滤。",
+  },
+  {
+    repo: "6551Team/daily-news",
+    url: "https://github.com/6551Team/daily-news",
+    role: "api-backend",
+    notes: "基于 6551 API 的每日资讯/热点项目。",
+    influence: "补充每日新闻型数据的兜底思路。",
+  },
+  {
+    repo: "anuj0456/AiLert",
+    url: "https://github.com/anuj0456/AiLert",
+    role: "domain-feed",
+    notes: "AI 内容聚合项目。",
+    influence: "在分类推断里增强 AI、模型、Agent、芯片等科技信号。",
+  },
+  {
+    repo: "Harshed-V/Tech_Trend_Monitor",
+    url: "https://github.com/Harshed-V/Tech_Trend_Monitor",
+    role: "monitoring",
+    notes: "GitHub、Dev.to、HN、Reddit 技术趋势监控。",
+    influence: "加入技术圈趋势和近期项目热度抓取。",
+  },
+  {
+    repo: "hrnrxb/AI-News-Aggregator-Bot",
+    url: "https://github.com/hrnrxb/AI-News-Aggregator-Bot",
+    role: "domain-feed",
+    notes: "AI/ML/NLP 新闻 Telegram Bot。",
+    influence: "把 AI 新闻类热点纳入风险提示和选题角度。",
+  },
+  {
+    repo: "hoodini/yuv-ai-trends",
+    url: "https://github.com/hoodini/yuv-ai-trends",
+    role: "domain-feed",
+    notes: "AI/ML 趋势聚合。",
+    influence: "增强技术热点的长尾跟进判断。",
+  },
+  {
+    repo: "JiuNian3219/hot-spot-api-service",
+    url: "https://github.com/JiuNian3219/hot-spot-api-service",
+    role: "api-backend",
+    notes: "Python 后端热点 API 服务。",
+    influence: "继续保持 API 与聚类层分离，便于后续换源。",
+  },
+  {
+    repo: "ly364124/hot-news-app",
+    url: "https://github.com/ly364124/hot-news-app",
+    role: "source-map",
+    notes: "知乎、微博实时热点应用。",
+    influence: "重点保障微博、知乎两类高频热点源。",
+  },
+  {
+    repo: "wupinshuo/durian-hotlist",
+    url: "https://github.com/wupinshuo/durian-hotlist",
+    role: "source-map",
+    notes: "科技与信息流热榜项目。",
+    influence: "补充信息流平台的统一热度计算。",
+  },
+  {
+    repo: "fenglingback/best-dy-hotlist",
+    url: "https://github.com/fenglingback/best-dy-hotlist",
+    role: "domain-feed",
+    notes: "抖音热榜方向项目。",
+    influence: "强化抖音 route 和短视频趋势分类。",
+  },
+];
 
 const SOURCES: HotspotSource[] = [
-  { code: "weibo", label: "微博", category: "社交热搜", color: "#ff5d7d", weight: 1.18 },
-  { code: "baidu", label: "百度", category: "公共事件", color: "#6ea8ff", weight: 1.08 },
-  { code: "zhihu", label: "知乎", category: "深度讨论", color: "#66d6a8", weight: 1.02 },
-  { code: "douyin", label: "抖音", category: "短视频趋势", color: "#ff8a3d", weight: 1.08 },
-  { code: "bilibili", label: "B站", category: "视频社区", color: "#7bd8ff", weight: 0.96 },
-  { code: "jinritoutiao", label: "今日头条", category: "资讯热点", color: "#ff7061", weight: 0.98 },
-  { code: "github", label: "GitHub", category: "技术项目", color: "#b7c4d6", weight: 0.9 },
-  { code: "hackernews", label: "Hacker News", category: "技术讨论", color: "#f6a04d", weight: 0.86 },
-  { code: "juejin", label: "掘金", category: "开发者社区", color: "#6aa8ff", weight: 0.84 },
-  { code: "sspai", label: "少数派", category: "数字生活", color: "#e46b7c", weight: 0.82 },
+  { code: "weibo", label: "微博", category: "社交热搜", color: "#ff5d7d", weight: 1.18, orzPlatform: "weibo", dailyHotRoute: "weibo", sixtyRoute: "weibo", nativeFetcher: fetchNativeWeibo },
+  { code: "baidu", label: "百度", category: "公共事件", color: "#6ea8ff", weight: 1.08, orzPlatform: "baidu", dailyHotRoute: "baidu", sixtyRoute: "baidu/hot" },
+  { code: "zhihu", label: "知乎", category: "深度讨论", color: "#66d6a8", weight: 1.02, orzPlatform: "zhihu", dailyHotRoute: "zhihu", sixtyRoute: "zhihu", nativeFetcher: fetchNativeZhihu },
+  { code: "douyin", label: "抖音", category: "短视频趋势", color: "#ff8a3d", weight: 1.08, orzPlatform: "douyin", dailyHotRoute: "douyin", sixtyRoute: "douyin" },
+  { code: "bilibili", label: "B站", category: "视频社区", color: "#7bd8ff", weight: 0.96, orzPlatform: "bilibili", dailyHotRoute: "bilibili", sixtyRoute: "bilibili", nativeFetcher: fetchNativeBilibili },
+  { code: "jinritoutiao", label: "今日头条", category: "资讯热点", color: "#ff7061", weight: 0.98, orzPlatform: "jinritoutiao", dailyHotRoute: "toutiao", sixtyRoute: "toutiao" },
+  { code: "github", label: "GitHub", category: "技术项目", color: "#b7c4d6", weight: 0.9, orzPlatform: "github", dailyHotRoute: "github", nativeFetcher: fetchNativeGitHub },
+  { code: "hackernews", label: "Hacker News", category: "技术讨论", color: "#f6a04d", weight: 0.86, orzPlatform: "hackernews", dailyHotRoute: "hackernews", nativeFetcher: fetchNativeHackerNews },
+  { code: "juejin", label: "掘金", category: "开发者社区", color: "#6aa8ff", weight: 0.84, orzPlatform: "juejin", dailyHotRoute: "juejin" },
+  { code: "sspai", label: "少数派", category: "数字生活", color: "#e46b7c", weight: 0.82, orzPlatform: "sspai", dailyHotRoute: "sspai" },
+  { code: "kuaishou", label: "快手", category: "短视频趋势", color: "#ffb020", weight: 0.9, dailyHotRoute: "kuaishou" },
+  { code: "tieba", label: "贴吧", category: "兴趣社区", color: "#5da2ff", weight: 0.82, dailyHotRoute: "tieba", nativeFetcher: fetchNativeTieba },
+  { code: "thepaper", label: "澎湃新闻", category: "公共事件", color: "#7cc4ff", weight: 0.9, dailyHotRoute: "thepaper", nativeFetcher: fetchNativeThePaper },
+  { code: "ithome", label: "IT之家", category: "科技资讯", color: "#ff6b6b", weight: 0.86, dailyHotRoute: "ithome", nativeFetcher: fetchNativeIthome },
+  { code: "netease-news", label: "网易新闻", category: "资讯热点", color: "#dc2626", weight: 0.86, dailyHotRoute: "netease-news", nativeFetcher: fetchNativeNetease },
+  { code: "qq-news", label: "腾讯新闻", category: "资讯热点", color: "#4f9bff", weight: 0.84, dailyHotRoute: "qq-news" },
+  { code: "36kr", label: "36氪", category: "财经商业", color: "#4ade80", weight: 0.84, dailyHotRoute: "36kr" },
+  { code: "hupu", label: "虎扑", category: "体育社区", color: "#f59e0b", weight: 0.8, dailyHotRoute: "hupu" },
+  { code: "v2ex", label: "V2EX", category: "开发者社区", color: "#94a3b8", weight: 0.8, dailyHotRoute: "v2ex", nativeFetcher: fetchNativeV2ex },
+  { code: "hellogithub", label: "HelloGitHub", category: "技术项目", color: "#22c55e", weight: 0.78, dailyHotRoute: "hellogithub", nativeFetcher: fetchNativeHelloGitHub },
+  { code: "xiaohongshu", label: "小红书", category: "生活方式", color: "#ff2d55", weight: 0.92, dailyHotRoute: "xiaohongshu" },
+  { code: "so360", label: "360搜索", category: "搜索热榜", color: "#60d394", weight: 0.78, dailyHotRoute: "so360" },
+  { code: "sogou", label: "搜狗", category: "搜索热榜", color: "#f97316", weight: 0.78, dailyHotRoute: "sogou" },
+  { code: "sina", label: "新浪", category: "资讯热点", color: "#f43f5e", weight: 0.78, dailyHotRoute: "sina" },
+  { code: "douban-movie", label: "豆瓣电影", category: "文娱内容", color: "#22c55e", weight: 0.74, dailyHotRoute: "douban-movie", nativeFetcher: fetchNativeDoubanMovie },
 ];
 
 const STOP_WORDS = new Set([
@@ -146,6 +377,8 @@ const STOP_WORDS = new Set([
   "中国",
   "美国",
   "今日",
+  "新闻",
+  "热搜",
   "the",
   "and",
   "for",
@@ -172,11 +405,14 @@ export async function getHotspotPayload(params?: {
   results.forEach((result, index) => {
     const source = SOURCES[index];
     if (result.status === "fulfilled") {
+      const backends = Array.from(new Set(result.value.map((item) => item.backend)));
       sourceHealth.push({
         platform: source.label,
         platformCode: source.code,
-        ok: true,
+        ok: result.value.length > 0,
         count: result.value.length,
+        backend: backends.join(" + ") || "无数据",
+        message: result.value.length ? undefined : "接口可访问但没有返回可用条目",
       });
       allItems.push(...result.value);
     } else {
@@ -185,22 +421,39 @@ export async function getHotspotPayload(params?: {
         platformCode: source.code,
         ok: false,
         count: 0,
+        backend: "全部后备失败",
         message: result.reason instanceof Error ? result.reason.message : String(result.reason),
       });
     }
   });
 
   const topics = buildTopics(allItems).slice(0, params?.limit ?? 36);
+  const activeBackends = new Set(allItems.map((item) => item.backend));
   const payload: HotspotPayload = {
     generatedAt: new Date().toISOString(),
-    platforms: ["全平台", "微博", "百度", "知乎", "抖音", "B站", "今日头条", "技术圈"],
+    platforms: [
+      "全平台",
+      "微博",
+      "百度",
+      "知乎",
+      "抖音",
+      "B站",
+      "今日头条",
+      "小红书",
+      "GitHub",
+      "Hacker News",
+      "技术圈",
+    ],
     topics,
     sourceHealth,
+    projectReferences: HOTSPOT_PROJECT_REFERENCES,
     summary: {
       totalItems: allItems.length,
       activeSources: sourceHealth.filter((source) => source.ok).length,
       crossPlatformTopics: topics.filter((topic) => topic.sources.length > 1).length,
-      source: "orz.ai dailynews + local clustering",
+      backendCount: activeBackends.size,
+      projectReferenceCount: HOTSPOT_PROJECT_REFERENCES.length,
+      source: "orz.ai + DailyHotApi + 60s + native fetchers + local clustering",
     },
   };
 
@@ -209,55 +462,372 @@ export async function getHotspotPayload(params?: {
 }
 
 async function fetchSourceItems(source: HotspotSource): Promise<HotspotSourceItem[]> {
-  let lastError: unknown;
-  for (const endpoint of ORZ_DAILY_NEWS_ENDPOINTS) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8500);
-    try {
-      const url = new URL(endpoint);
-      url.searchParams.set("platform", source.code);
-      const response = await fetch(url, {
-        signal: controller.signal,
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
-      if (!response.ok) {
-        throw new Error(`${source.label} returned ${response.status}`);
-      }
-      const json = (await response.json()) as OrzDailyNewsResponse;
-      const data = Array.isArray(json.data) ? json.data : [];
-      return data
-        .map((item, index) => normalizeOrzItem(item, source, index))
-        .filter((item): item is HotspotSourceItem => Boolean(item));
-    } catch (error) {
-      lastError = error;
-    } finally {
-      clearTimeout(timeout);
+  const attempts: Array<Promise<HotspotSourceItem[]>> = [];
+
+  if (source.orzPlatform) {
+    attempts.push(fetchOrzItems(source));
+  }
+  if (source.dailyHotRoute) {
+    attempts.push(fetchDailyHotItems(source));
+  }
+  if (source.sixtyRoute) {
+    attempts.push(fetchSixtySecondItems(source));
+  }
+  if (source.nativeFetcher) {
+    attempts.push(source.nativeFetcher(source));
+  }
+
+  const results = await Promise.allSettled(attempts);
+  const errors: string[] = [];
+  const items: HotspotSourceItem[] = [];
+
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      items.push(...result.value);
+    } else {
+      errors.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
     }
   }
-  throw lastError instanceof Error ? lastError : new Error(`${source.label} fetch failed`);
+
+  const deduped = dedupeItems(items).slice(0, 80);
+  if (deduped.length > 0) return deduped;
+  throw new Error(errors.slice(0, 3).join(" / ") || `${source.label} fetch failed`);
 }
 
-function normalizeOrzItem(
-  item: OrzDailyNewsItem,
+async function fetchOrzItems(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  let lastError: unknown;
+  for (const endpoint of ORZ_DAILY_NEWS_ENDPOINTS) {
+    try {
+      const url = new URL(endpoint);
+      url.searchParams.set("platform", source.orzPlatform ?? source.code);
+      const json = await fetchJson<GenericHotResponse>(url.toString(), "orz.ai");
+      return normalizeItems(extractItemArray(json), source, "orz.ai");
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`${source.label} orz.ai fetch failed`);
+}
+
+async function fetchDailyHotItems(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const json = await fetchJson<GenericHotResponse>(`${DAILY_HOT_API_BASE}/${source.dailyHotRoute}`, "DailyHotApi");
+  return normalizeItems(extractItemArray(json), source, "DailyHotApi");
+}
+
+async function fetchSixtySecondItems(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const json = await fetchJson<GenericHotResponse>(`${SIXTY_SECONDS_BASE}/${source.sixtyRoute}`, "60s");
+  return normalizeItems(extractItemArray(json), source, "60s");
+}
+
+async function fetchNativeWeibo(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const json = await fetchJson<{ data?: { realtime?: unknown[] } }>("https://weibo.com/ajax/side/hotSearch", "微博原生");
+  return normalizeItems(json.data?.realtime ?? [], source, "微博原生");
+}
+
+async function fetchNativeZhihu(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const json = await fetchJson<GenericHotResponse>("https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total", "知乎原生");
+  return normalizeItems(extractItemArray(json), source, "知乎原生");
+}
+
+async function fetchNativeBilibili(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const json = await fetchJson<GenericHotResponse>("https://api.bilibili.com/x/web-interface/popular?ps=30&pn=1", "B站原生");
+  return normalizeItems(extractItemArray(json), source, "B站原生");
+}
+
+async function fetchNativeHackerNews(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const json = await fetchJson<{ hits?: Array<{ title?: string; url?: string; points?: number; objectID?: string }> }>(
+    "https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=30",
+    "HN Algolia",
+  );
+  const items = (json.hits ?? []).map((item) => ({
+    title: item.title,
+    url: item.url ?? `https://news.ycombinator.com/item?id=${item.objectID}`,
+    score: item.points,
+  }));
+  return normalizeItems(items, source, "HN Algolia");
+}
+
+async function fetchNativeGitHub(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const url = `https://api.github.com/search/repositories?q=created:%3E${since}&sort=stars&order=desc&per_page=30`;
+  const json = await fetchJson<{ items?: Array<{ full_name?: string; html_url?: string; stargazers_count?: number; description?: string }> }>(
+    url,
+    "GitHub Search",
+  );
+  const items = (json.items ?? []).map((item) => ({
+    title: item.full_name,
+    url: item.html_url,
+    score: item.stargazers_count,
+    desc: item.description,
+  }));
+  return normalizeItems(items, source, "GitHub Search");
+}
+
+async function fetchNativeV2ex(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const json = await fetchJson<Array<{ title?: string; url?: string; content?: string; replies?: number }>>(
+    "https://www.v2ex.com/api/topics/hot.json",
+    "V2EX 原生",
+  );
+  return normalizeItems(json, source, "V2EX 原生");
+}
+
+async function fetchNativeTieba(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const json = await fetchJson<{
+    data?: { bang_topic?: { topic_list?: Array<{ topic_name?: string; topic_desc?: string; topic_url?: string; discuss_num?: number }> } };
+  }>("https://tieba.baidu.com/hottopic/browse/topicList", "贴吧原生");
+  const items = (json.data?.bang_topic?.topic_list ?? []).map((item) => ({
+    title: item.topic_name,
+    desc: item.topic_desc,
+    url: decodeBasicEntities(item.topic_url ?? ""),
+    score: item.discuss_num,
+  }));
+  return normalizeItems(items, source, "贴吧原生");
+}
+
+async function fetchNativeThePaper(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const json = await fetchJson<{
+    data?: { hotNews?: Array<{ name?: string; link?: string; interactionNum?: number; praiseTimes?: number }> };
+  }>("https://cache.thepaper.cn/contentapi/wwwIndex/rightSidebar", "澎湃原生");
+  const items = (json.data?.hotNews ?? []).map((item) => ({
+    title: item.name,
+    url: item.link,
+    score: item.interactionNum ?? item.praiseTimes,
+  }));
+  return normalizeItems(items, source, "澎湃原生");
+}
+
+async function fetchNativeNetease(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const json = await fetchJson<{
+    data?: { list?: Array<{ title?: string; url?: string; source?: string; docid?: string }> };
+  }>("https://m.163.com/fe/api/hot/news/flow", "网易原生");
+  const items = (json.data?.list ?? []).map((item, index) => ({
+    title: item.title,
+    url: item.url,
+    desc: item.source,
+    score: 20000 - index * 550,
+  }));
+  return normalizeItems(items, source, "网易原生");
+}
+
+async function fetchNativeDoubanMovie(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const json = await fetchJson<{
+    subjects?: Array<{ title?: string; url?: string; rate?: string; is_new?: boolean }>;
+  }>("https://movie.douban.com/j/search_subjects?type=movie&tag=%E7%83%AD%E9%97%A8&page_limit=30&page_start=0", "豆瓣电影原生");
+  const items = (json.subjects ?? []).map((item, index) => ({
+    title: item.title,
+    url: item.url,
+    score: Number.parseFloat(item.rate ?? "0") * 1000 + (item.is_new ? 6000 : 0) + Math.max(0, 5000 - index * 120),
+    desc: item.rate ? `豆瓣评分 ${item.rate}` : "",
+  }));
+  return normalizeItems(items, source, "豆瓣电影原生");
+}
+
+async function fetchNativeIthome(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const xml = await fetchText("https://www.ithome.com/rss/", "IT之家 RSS");
+  return normalizeItems(parseRssItems(xml), source, "IT之家 RSS");
+}
+
+async function fetchNativeHelloGitHub(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const xml = await fetchText("https://hellogithub.com/rss", "HelloGitHub RSS");
+  return normalizeItems(parseRssItems(xml), source, "HelloGitHub RSS");
+}
+
+async function fetchJson<T>(url: string, label: string): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json,text/plain,*/*",
+        "User-Agent": "hot-catch/1.0 (+https://github.com/stars131/hot-catch)",
+      },
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new Error(`${label} returned ${response.status}`);
+    }
+    return (await response.json()) as T;
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(`${label}: ${error.message}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchText(url: string, label: string): Promise<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        Accept: "application/rss+xml,text/xml,text/plain,*/*",
+        "User-Agent": "hot-catch/1.0 (+https://github.com/stars131/hot-catch)",
+      },
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new Error(`${label} returned ${response.status}`);
+    }
+    return response.text();
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(`${label}: ${error.message}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function extractItemArray(response: unknown): unknown[] {
+  if (Array.isArray(response)) return response;
+  if (!response || typeof response !== "object") return [];
+  const record = response as Record<string, unknown>;
+  const candidates = [
+    record.data,
+    record.result,
+    record.news,
+    record.list,
+    record.subjects,
+    pickNested(record.data, ["list", "items", "data", "cards", "realtime", "hot", "rank"]),
+    pickNested(record.result, ["list", "items", "data", "cards", "realtime", "hot", "rank"]),
+  ];
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate;
+  }
+  return [];
+}
+
+function parseRssItems(xml: string): GenericHotItem[] {
+  return Array.from(xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi))
+    .slice(0, 30)
+    .map((match, index) => {
+      const block = match[1];
+      return {
+        title: cleanXmlText(readXmlTag(block, "title")),
+        url: cleanXmlText(readXmlTag(block, "link")),
+        desc: cleanXmlText(readXmlTag(block, "description")).slice(0, 180),
+        score: 20000 - index * 550,
+      };
+    });
+}
+
+function readXmlTag(block: string, tag: string) {
+  const match = block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
+  return match?.[1] ?? "";
+}
+
+function cleanXmlText(text: string) {
+  return decodeBasicEntities(text)
+    .replace(/<!\[CDATA\[|\]\]>/g, "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function decodeBasicEntities(text: string) {
+  return text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+function pickNested(value: unknown, keys: string[]) {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  for (const key of keys) {
+    const nested = record[key];
+    if (Array.isArray(nested)) return nested;
+  }
+  return undefined;
+}
+
+function normalizeItems(items: unknown[], source: HotspotSource, backend: string): HotspotSourceItem[] {
+  return items
+    .map((item, index) => normalizeItem(item, source, index, backend))
+    .filter((item): item is HotspotSourceItem => Boolean(item));
+}
+
+function normalizeItem(
+  item: unknown,
   source: HotspotSource,
   index: number,
+  backend: string,
 ): HotspotSourceItem | null {
-  const title = String(item.title ?? "").trim();
+  if (!item || typeof item !== "object") return null;
+  const record = item as GenericHotItem & Record<string, unknown>;
+  const target = normalizeNestedTarget(record);
+  const title = String(
+    target.title ??
+      target.name ??
+      target.word ??
+      target.keyword ??
+      target.query ??
+      target.desc ??
+      target.content ??
+      "",
+  ).trim();
   if (!title) return null;
-  const rawScore = String(item.score ?? item.hot ?? "");
+  const rawScore = String(
+    target.score ??
+      target.hot ??
+      target.hot_value ??
+      target.hotValue ??
+      target.heat ??
+      target.views ??
+      target.view ??
+      target.interactionNum ??
+      target.discuss_num ??
+      target.replies ??
+      target.rate ??
+      "",
+  );
   const score = parseScore(rawScore) || Math.max(1000, 20000 - index * 600);
   return {
-    id: `${source.code}-${hashText(title)}-${index}`,
+    id: `${source.code}-${backend}-${hashText(title)}-${index}`,
     title,
-    url: String(item.url ?? ""),
+    url: String(target.url ?? target.link ?? target.mobileUrl ?? target.href ?? ""),
     score: Math.round(score * source.weight),
     rawScore,
-    desc: String(item.desc ?? item.content ?? "").trim(),
+    desc: String(target.desc ?? target.description ?? target.content ?? target.abstract ?? "").trim(),
     platform: source.label,
     platformCode: source.code,
     rank: index + 1,
+    backend,
   };
+}
+
+function normalizeNestedTarget(record: GenericHotItem & Record<string, unknown>) {
+  const target = { ...record };
+  if (record.target && typeof record.target === "object") {
+    Object.assign(target, record.target);
+  }
+  if (record.children && typeof record.children === "object") {
+    Object.assign(target, record.children);
+  }
+  if (record.card && typeof record.card === "object") {
+    Object.assign(target, record.card);
+  }
+  return target as GenericHotItem;
+}
+
+function dedupeItems(items: HotspotSourceItem[]) {
+  const seen = new Set<string>();
+  const deduped: HotspotSourceItem[] = [];
+  for (const item of items.sort((a, b) => b.score - a.score)) {
+    const key = normalizeTitle(item.title);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+  }
+  return deduped.map((item, index) => ({ ...item, rank: index + 1 }));
 }
 
 function buildTopics(items: HotspotSourceItem[]): HotspotTopic[] {
@@ -294,9 +864,10 @@ function buildTopics(items: HotspotSourceItem[]): HotspotTopic[] {
 function clusterToTopic(cluster: TopicCluster): HotspotTopic {
   const topItem = [...cluster.items].sort((a, b) => b.score - a.score)[0];
   const sourceCount = new Set(cluster.items.map((item) => item.platformCode)).size;
-  const scoreBoost = sourceCount > 1 ? 1 + sourceCount * 0.16 : 1;
+  const backendCount = new Set(cluster.items.map((item) => item.backend)).size;
+  const scoreBoost = sourceCount > 1 ? 1 + sourceCount * 0.16 : 1 + Math.min(backendCount, 4) * 0.05;
   const heat = clamp(Math.round(logScale(cluster.score * scoreBoost, 1_000, 12_000_000, 42, 99)), 36, 99);
-  const change = Math.round((heat - 52) * 1.7 + sourceCount * 11 - Math.min(topItem.rank, 20) * 0.7);
+  const change = Math.round((heat - 52) * 1.7 + sourceCount * 11 + backendCount * 4 - Math.min(topItem.rank, 20) * 0.7);
   const status = inferStatus(heat, sourceCount, change);
   const trend = buildTrend(heat, change, cluster.id);
 
@@ -312,14 +883,14 @@ function clusterToTopic(cluster: TopicCluster): HotspotTopic {
     peakEta: sourceCount > 1 ? "2-4 小时内继续扩散" : heat > 78 ? "4-8 小时内观察" : "适合长尾跟进",
     notes: cluster.items.length,
     engagement: formatEngagement(cluster.items.reduce((sum, item) => sum + item.score, 0)),
-    creators: `${sourceCount} 个来源`,
+    creators: `${sourceCount} 个平台 / ${backendCount} 个后端`,
     related: cluster.keywords.length,
     trend,
     platformShare: buildPlatformShare(cluster.items),
     angles: buildAngles(cluster.title, inferCategory(cluster, topItem.platformCode), heat, status),
     riskNotes: buildRiskNotes(cluster),
     keywords: cluster.keywords.slice(0, 8),
-    sources: cluster.items.slice(0, 6),
+    sources: cluster.items.slice(0, 8),
   };
 }
 
@@ -366,8 +937,11 @@ function buildRiskNotes(cluster: TopicCluster) {
   if (cluster.items.some((item) => item.platformCode === "weibo" || item.platformCode === "douyin")) {
     notes.push("娱乐和社交热点容易反转，正文里保留信息来源和时间点。");
   }
-  if (cluster.items.some((item) => item.platformCode === "github" || item.platformCode === "hackernews")) {
+  if (cluster.items.some((item) => ["github", "hackernews", "juejin", "v2ex", "hellogithub"].includes(item.platformCode))) {
     notes.push("技术类热点适合解释应用场景，不要只复述项目名和 star 数。");
+  }
+  if (cluster.items.some((item) => ["baidu", "qq-news", "netease-news", "thepaper", "sina"].includes(item.platformCode))) {
+    notes.push("新闻类热点要区分已确认事实、媒体报道和个人判断。");
   }
   return notes.slice(0, 3);
 }
@@ -432,11 +1006,12 @@ function mergeKeywords(a: string[], b: string[]) {
 
 function inferCategory(cluster: TopicCluster, fallbackCode: HotspotPlatformCode) {
   const text = `${cluster.title} ${cluster.keywords.join(" ")}`;
-  if (/ai|模型|openai|github|代码|开发|agent|芯片|机器人|算法/i.test(text)) return "科技与AI";
-  if (/股|金融|基金|美元|经济|公司|财报|上市|投资|市场/.test(text)) return "财经商业";
-  if (/电影|综艺|明星|剧|演唱会|音乐|游戏|b站|视频/.test(text)) return "文娱内容";
+  if (/ai|模型|openai|github|代码|开发|agent|芯片|机器人|算法|v2ex|hello/i.test(text)) return "科技与AI";
+  if (/股|金融|基金|美元|经济|公司|财报|上市|投资|市场|36氪/.test(text)) return "财经商业";
+  if (/电影|综艺|明星|剧|演唱会|音乐|游戏|b站|视频|豆瓣/.test(text)) return "文娱内容";
   if (/考试|学校|学生|教育|高考|大学|论文/.test(text)) return "教育成长";
-  if (/穿搭|美妆|护肤|旅游|城市|早餐|家居|消费/.test(text)) return "生活方式";
+  if (/穿搭|美妆|护肤|旅游|城市|早餐|家居|消费|小红书/.test(text)) return "生活方式";
+  if (/足球|篮球|nba|cba|英超|虎扑/i.test(text)) return "体育赛事";
   return getSource(fallbackCode).category;
 }
 
