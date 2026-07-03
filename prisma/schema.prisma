@@ -1,0 +1,293 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Platform {
+  xiaohongshu
+}
+
+enum FetchStatus {
+  pending
+  success
+  failed
+  partial
+  manual_required
+}
+
+enum MessageRole {
+  user
+  assistant
+  system
+  tool
+}
+
+enum ContentStatus {
+  draft
+  saved
+  abandoned
+  published
+}
+
+enum InputType {
+  xhs_id
+  xhs_profile_url
+  xhs_note_url
+  topic
+  idea
+  draft
+  command
+  unknown
+}
+
+enum AnalysisType {
+  single_account
+  multiple_accounts
+  fusion
+}
+
+model User {
+  id            String              @id @default(cuid())
+  email         String?             @unique
+  name          String?
+  avatarUrl     String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  personas      Persona[]
+  accounts      BenchmarkAccount[]
+  conversations Conversation[]
+  contents      GeneratedContent[]
+  fetchLogs     FetchLog[]
+  aiLogs        AiCallLog[]
+  analyses      BenchmarkAnalysis[]
+}
+
+model Persona {
+  id                 String             @id @default(cuid())
+  userId             String
+  name               String?
+  accountName        String?
+  niche              String?
+  creatorIdentity    String?
+  targetAudience     String?
+  contentStyle       String?
+  learningAccounts   String?
+  avoidTopics        String?
+  businessGoal       String?
+  ageStage           String?
+  city               String?
+  accountStatus      String?
+  followerCount      Int?
+  updateFrequency    String?
+  monetizationType   String?
+  personalExperience String?
+  expressionBoundary String?
+  forbiddenTopics    String?
+  valuesKeywords     String?
+  commonPhrases      String?
+  accountGoal        String?
+  personalStrengths  String?
+  personalWeaknesses String?
+  sustainableTopics  String?
+  isDefault          Boolean            @default(false)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contents           GeneratedContent[]
+}
+
+model BenchmarkAccount {
+  id             String              @id @default(cuid())
+  userId         String
+  platform       Platform            @default(xiaohongshu)
+  xhsId          String?
+  nickname       String?
+  avatarUrl      String?
+  profileUrl     String?
+  description    String?
+  category       String?
+  followerCount  Int?
+  followingCount Int?
+  likedCount     Int?
+  noteCount      Int?
+  rawData        Json?
+  sourceType     String?
+  sourceUrl      String?
+  dataConfidence Float?
+  fetchStatus    FetchStatus         @default(pending)
+  lastFetchedAt  DateTime?
+  userRemark     String?
+  groupName      String?
+  isFavorite     Boolean             @default(false)
+  isArchived     Boolean             @default(false)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notes          BenchmarkNote[]
+  analyses       BenchmarkAnalysis[]
+
+  @@index([userId])
+  @@index([xhsId])
+  @@index([profileUrl])
+}
+
+model BenchmarkNote {
+  id             String            @id @default(cuid())
+  accountId      String?
+  noteId         String?
+  noteUrl        String?
+  title          String?
+  content        String?
+  coverUrl       String?
+  publishTime    DateTime?
+  likeCount      Int?
+  collectCount   Int?
+  commentCount   Int?
+  shareCount     Int?
+  tags           String[]          @default([])
+  rawData        Json?
+  sourceType     String?
+  dataConfidence Float?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  account        BenchmarkAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  @@index([accountId])
+  @@index([noteId])
+  @@index([noteUrl])
+}
+
+model BenchmarkAnalysis {
+  id                String            @id @default(cuid())
+  userId            String
+  accountId         String?
+  analysisType      AnalysisType
+  positioning       String?
+  targetAudience    String?
+  frequentTopics    Json?
+  titlePatterns     Json?
+  coverStyle        String?
+  contentStructure  String?
+  languageStyle     String?
+  interactionStyle  String?
+  personaExpression String?
+  learnablePoints   Json?
+  avoidPoints       Json?
+  userAdaptation    String?
+  fullReport        String?
+  modelName         String?
+  promptVersion     String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account           BenchmarkAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([accountId])
+}
+
+model Conversation {
+  id        String    @id @default(cuid())
+  userId    String
+  title     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  Message[]
+  contents  GeneratedContent[]
+
+  @@index([userId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  role           MessageRole
+  content        String
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+}
+
+model GeneratedContent {
+  id                    String          @id @default(cuid())
+  userId                String
+  conversationId        String?
+  personaId             String?
+  title                 String?
+  inputType             InputType?
+  inputText             String?
+  selectedAccountIds    String[]        @default([])
+  outputType            String          @default("xhs_graphic")
+  generatedTitleOptions Json?
+  coverTextOptions      Json?
+  pageStructure         Json?
+  bodyText              String?
+  tags                  String[]        @default([])
+  interactionEnding     String?
+  benchmarkExplanation  String?
+  riskNotes             String?
+  fullMarkdown          String?
+  status                ContentStatus   @default(draft)
+  modelName             String?
+  promptVersion         String?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+  user                  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation          Conversation?   @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  persona               Persona?        @relation(fields: [personaId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([conversationId])
+}
+
+model FetchLog {
+  id           String      @id @default(cuid())
+  userId       String?
+  input        String
+  inputType    InputType
+  status       FetchStatus
+  resultType   String?
+  errorMessage String?
+  rawResponse  Json?
+  createdAt    DateTime    @default(now())
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+}
+
+model PromptTemplate {
+  id        String   @id @default(cuid())
+  type      String
+  version   String
+  content   String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([type, version])
+}
+
+model AiCallLog {
+  id            String   @id @default(cuid())
+  userId        String?
+  provider      String
+  modelName     String?
+  promptType    String
+  promptVersion String?
+  status        String
+  latencyMs     Int?
+  inputTokens   Int?
+  outputTokens  Int?
+  errorMessage  String?
+  createdAt     DateTime @default(now())
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+}

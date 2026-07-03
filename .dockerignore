@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.gitignore
+npm-debug.log
+README.md
+.env
+.env*.local
+Dockerfile
+.dockerignore
+/prisma/migrations
+开发文档.md
