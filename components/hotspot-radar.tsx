@@ -76,6 +76,8 @@ export type HotspotSourceHealth = {
   ok: boolean;
   count: number;
   backend?: string;
+  requiresCookie?: boolean;
+  cookieConfigured?: boolean;
   message?: string;
 };
 
@@ -694,6 +696,11 @@ function SourceHealthStrip(props: { sources: HotspotSourceHealth[] }) {
             <span className={cn("h-1.5 w-1.5", source.ok ? "bg-[#b6ff3b]" : "bg-amber-300")} />
             {source.platform}
             <span className="text-slate-500">{source.count}</span>
+            {source.requiresCookie ? (
+              <span className={cn("text-[10px]", source.cookieConfigured ? "text-[#b6ff3b]" : "text-amber-300")}>
+                Cookie
+              </span>
+            ) : null}
             {source.backend ? <span className="max-w-[92px] truncate text-slate-600">{source.backend}</span> : null}
           </span>
         ))}

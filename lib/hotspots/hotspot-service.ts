@@ -62,6 +62,18 @@ export type HotspotProjectReference = {
   influence: string;
 };
 
+export type HotspotSourceDefinition = {
+  code: HotspotPlatformCode;
+  label: HotspotPlatformLabel;
+  category: string;
+  apiPath: string;
+  requiresCookie: boolean;
+  cookieConfigured: boolean;
+  cookieEnv?: string;
+  upstreamEnv?: string;
+  notes?: string;
+};
+
 export type HotspotSourceItem = {
   id: string;
   title: string;
@@ -103,7 +115,16 @@ export type HotspotSourceHealth = {
   ok: boolean;
   count: number;
   backend: string;
+  requiresCookie?: boolean;
+  cookieConfigured?: boolean;
   message?: string;
+};
+
+export type HotspotSourceApiPayload = {
+  generatedAt: string;
+  source: HotspotSourceDefinition;
+  items: HotspotSourceItem[];
+  health: HotspotSourceHealth;
 };
 
 export type HotspotPayload = {
@@ -111,12 +132,15 @@ export type HotspotPayload = {
   platforms: Array<"全平台" | HotspotPlatformLabel | "技术圈">;
   topics: HotspotTopic[];
   sourceHealth: HotspotSourceHealth[];
+  sourceCatalog: HotspotSourceDefinition[];
   projectReferences: HotspotProjectReference[];
   summary: {
     totalItems: number;
     activeSources: number;
     crossPlatformTopics: number;
     backendCount: number;
+    cookieSourceCount: number;
+    cookieConfiguredCount: number;
     projectReferenceCount: number;
     source: string;
   };
@@ -131,7 +155,18 @@ type HotspotSource = {
   orzPlatform?: string;
   dailyHotRoute?: string;
   sixtyRoute?: string;
+  cookieBackend?: boolean;
   nativeFetcher?: (source: HotspotSource) => Promise<HotspotSourceItem[]>;
+};
+
+type CookieBackendConfig = {
+  code: HotspotPlatformCode;
+  cookieEnv: string;
+  upstreamEnv: string;
+  defaultUrl?: string;
+  method?: "GET" | "POST";
+  body?: string;
+  notes: string;
 };
 
 type GenericHotItem = {
@@ -189,6 +224,67 @@ const ORZ_DAILY_NEWS_ENDPOINTS = [
 ];
 const DAILY_HOT_API_BASE = "https://api-hot.imsyy.top";
 const SIXTY_SECONDS_BASE = "https://60s.viki.moe/v2";
+
+const COOKIE_BACKENDS: CookieBackendConfig[] = [
+  {
+    code: "xiaohongshu",
+    cookieEnv: "HOTSPOT_XIAOHONGSHU_COOKIE",
+    upstreamEnv: "HOTSPOT_XIAOHONGSHU_UPSTREAM",
+    defaultUrl: "https://edith.xiaohongshu.com/api/sns/web/v1/search/hot_list",
+    notes: "小红书 Web 热搜接口通常需要登录态 Cookie，也可能需要风控签名；可用自建上游聚合接口替代。",
+  },
+  {
+    code: "kuaishou",
+    cookieEnv: "HOTSPOT_KUAISHOU_COOKIE",
+    upstreamEnv: "HOTSPOT_KUAISHOU_UPSTREAM",
+    notes: "快手热榜常走 GraphQL/Web 会话，默认保留 Cookie 与自建上游入口。",
+  },
+  {
+    code: "hupu",
+    cookieEnv: "HOTSPOT_HUPU_COOKIE",
+    upstreamEnv: "HOTSPOT_HUPU_UPSTREAM",
+    notes: "虎扑社区页在部分网络下会触发风控；可配置 Cookie 或自建解析上游。",
+  },
+  {
+    code: "36kr",
+    cookieEnv: "HOTSPOT_36KR_COOKIE",
+    upstreamEnv: "HOTSPOT_36KR_UPSTREAM",
+    defaultUrl: "https://gateway.36kr.com/api/mis/nav/home/nav/rank/hot",
+    notes: "36氪网关可能按地域或频率返回异常；保留 Cookie 与聚合上游方案。",
+  },
+  {
+    code: "qq-news",
+    cookieEnv: "HOTSPOT_QQ_NEWS_COOKIE",
+    upstreamEnv: "HOTSPOT_QQ_NEWS_UPSTREAM",
+    defaultUrl: "https://i.news.qq.com/trpc.qqnews_web.kv_srv.kv_srv_http_proxy/list?sub_srv_id=24hours&srv_id=pc&offset=0&limit=30&strategy=1",
+    notes: "腾讯新闻热榜接口有时需要会话与频控；可经本地聚合 API 使用。",
+  },
+  {
+    code: "sspai",
+    cookieEnv: "HOTSPOT_SSPAI_COOKIE",
+    upstreamEnv: "HOTSPOT_SSPAI_UPSTREAM",
+    defaultUrl: "https://sspai.com/api/v1/article/tag/page/get?limit=30&offset=0",
+    notes: "少数派接口偶发需要客户端态；Cookie 配置后作为后备聚合源。",
+  },
+  {
+    code: "so360",
+    cookieEnv: "HOTSPOT_SO360_COOKIE",
+    upstreamEnv: "HOTSPOT_SO360_UPSTREAM",
+    notes: "360 搜索趋势在部分 TLS/风控场景下不稳定，保留自建上游入口。",
+  },
+  {
+    code: "sogou",
+    cookieEnv: "HOTSPOT_SOGOU_COOKIE",
+    upstreamEnv: "HOTSPOT_SOGOU_UPSTREAM",
+    notes: "搜狗热榜保留 Cookie 和自建上游入口。",
+  },
+  {
+    code: "sina",
+    cookieEnv: "HOTSPOT_SINA_COOKIE",
+    upstreamEnv: "HOTSPOT_SINA_UPSTREAM",
+    notes: "新浪热门页常见编码和访问限制问题，建议通过自建上游归一化。",
+  },
+];
 
 export const HOTSPOT_PROJECT_REFERENCES: HotspotProjectReference[] = [
   {
@@ -343,21 +439,21 @@ const SOURCES: HotspotSource[] = [
   { code: "github", label: "GitHub", category: "技术项目", color: "#b7c4d6", weight: 0.9, orzPlatform: "github", dailyHotRoute: "github", nativeFetcher: fetchNativeGitHub },
   { code: "hackernews", label: "Hacker News", category: "技术讨论", color: "#f6a04d", weight: 0.86, orzPlatform: "hackernews", dailyHotRoute: "hackernews", nativeFetcher: fetchNativeHackerNews },
   { code: "juejin", label: "掘金", category: "开发者社区", color: "#6aa8ff", weight: 0.84, orzPlatform: "juejin", dailyHotRoute: "juejin" },
-  { code: "sspai", label: "少数派", category: "数字生活", color: "#e46b7c", weight: 0.82, orzPlatform: "sspai", dailyHotRoute: "sspai" },
-  { code: "kuaishou", label: "快手", category: "短视频趋势", color: "#ffb020", weight: 0.9, dailyHotRoute: "kuaishou" },
+  { code: "sspai", label: "少数派", category: "数字生活", color: "#e46b7c", weight: 0.82, orzPlatform: "sspai", dailyHotRoute: "sspai", cookieBackend: true },
+  { code: "kuaishou", label: "快手", category: "短视频趋势", color: "#ffb020", weight: 0.9, dailyHotRoute: "kuaishou", cookieBackend: true },
   { code: "tieba", label: "贴吧", category: "兴趣社区", color: "#5da2ff", weight: 0.82, dailyHotRoute: "tieba", nativeFetcher: fetchNativeTieba },
   { code: "thepaper", label: "澎湃新闻", category: "公共事件", color: "#7cc4ff", weight: 0.9, dailyHotRoute: "thepaper", nativeFetcher: fetchNativeThePaper },
   { code: "ithome", label: "IT之家", category: "科技资讯", color: "#ff6b6b", weight: 0.86, dailyHotRoute: "ithome", nativeFetcher: fetchNativeIthome },
   { code: "netease-news", label: "网易新闻", category: "资讯热点", color: "#dc2626", weight: 0.86, dailyHotRoute: "netease-news", nativeFetcher: fetchNativeNetease },
-  { code: "qq-news", label: "腾讯新闻", category: "资讯热点", color: "#4f9bff", weight: 0.84, dailyHotRoute: "qq-news" },
-  { code: "36kr", label: "36氪", category: "财经商业", color: "#4ade80", weight: 0.84, dailyHotRoute: "36kr" },
-  { code: "hupu", label: "虎扑", category: "体育社区", color: "#f59e0b", weight: 0.8, dailyHotRoute: "hupu" },
+  { code: "qq-news", label: "腾讯新闻", category: "资讯热点", color: "#4f9bff", weight: 0.84, dailyHotRoute: "qq-news", cookieBackend: true },
+  { code: "36kr", label: "36氪", category: "财经商业", color: "#4ade80", weight: 0.84, dailyHotRoute: "36kr", cookieBackend: true },
+  { code: "hupu", label: "虎扑", category: "体育社区", color: "#f59e0b", weight: 0.8, dailyHotRoute: "hupu", cookieBackend: true },
   { code: "v2ex", label: "V2EX", category: "开发者社区", color: "#94a3b8", weight: 0.8, dailyHotRoute: "v2ex", nativeFetcher: fetchNativeV2ex },
   { code: "hellogithub", label: "HelloGitHub", category: "技术项目", color: "#22c55e", weight: 0.78, dailyHotRoute: "hellogithub", nativeFetcher: fetchNativeHelloGitHub },
-  { code: "xiaohongshu", label: "小红书", category: "生活方式", color: "#ff2d55", weight: 0.92, dailyHotRoute: "xiaohongshu" },
-  { code: "so360", label: "360搜索", category: "搜索热榜", color: "#60d394", weight: 0.78, dailyHotRoute: "so360" },
-  { code: "sogou", label: "搜狗", category: "搜索热榜", color: "#f97316", weight: 0.78, dailyHotRoute: "sogou" },
-  { code: "sina", label: "新浪", category: "资讯热点", color: "#f43f5e", weight: 0.78, dailyHotRoute: "sina" },
+  { code: "xiaohongshu", label: "小红书", category: "生活方式", color: "#ff2d55", weight: 0.92, dailyHotRoute: "xiaohongshu", cookieBackend: true },
+  { code: "so360", label: "360搜索", category: "搜索热榜", color: "#60d394", weight: 0.78, dailyHotRoute: "so360", cookieBackend: true },
+  { code: "sogou", label: "搜狗", category: "搜索热榜", color: "#f97316", weight: 0.78, dailyHotRoute: "sogou", cookieBackend: true },
+  { code: "sina", label: "新浪", category: "资讯热点", color: "#f43f5e", weight: 0.78, dailyHotRoute: "sina", cookieBackend: true },
   { code: "douban-movie", label: "豆瓣电影", category: "文娱内容", color: "#22c55e", weight: 0.74, dailyHotRoute: "douban-movie", nativeFetcher: fetchNativeDoubanMovie },
 ];
 
@@ -404,6 +500,7 @@ export async function getHotspotPayload(params?: {
 
   results.forEach((result, index) => {
     const source = SOURCES[index];
+    const definition = toSourceDefinition(source);
     if (result.status === "fulfilled") {
       const backends = Array.from(new Set(result.value.map((item) => item.backend)));
       sourceHealth.push({
@@ -412,6 +509,8 @@ export async function getHotspotPayload(params?: {
         ok: result.value.length > 0,
         count: result.value.length,
         backend: backends.join(" + ") || "无数据",
+        requiresCookie: definition.requiresCookie,
+        cookieConfigured: definition.cookieConfigured,
         message: result.value.length ? undefined : "接口可访问但没有返回可用条目",
       });
       allItems.push(...result.value);
@@ -422,6 +521,8 @@ export async function getHotspotPayload(params?: {
         ok: false,
         count: 0,
         backend: "全部后备失败",
+        requiresCookie: definition.requiresCookie,
+        cookieConfigured: definition.cookieConfigured,
         message: result.reason instanceof Error ? result.reason.message : String(result.reason),
       });
     }
@@ -429,6 +530,7 @@ export async function getHotspotPayload(params?: {
 
   const topics = buildTopics(allItems).slice(0, params?.limit ?? 36);
   const activeBackends = new Set(allItems.map((item) => item.backend));
+  const sourceCatalog = listHotspotSourceDefinitions();
   const payload: HotspotPayload = {
     generatedAt: new Date().toISOString(),
     platforms: [
@@ -446,19 +548,66 @@ export async function getHotspotPayload(params?: {
     ],
     topics,
     sourceHealth,
+    sourceCatalog,
     projectReferences: HOTSPOT_PROJECT_REFERENCES,
     summary: {
       totalItems: allItems.length,
       activeSources: sourceHealth.filter((source) => source.ok).length,
       crossPlatformTopics: topics.filter((topic) => topic.sources.length > 1).length,
       backendCount: activeBackends.size,
+      cookieSourceCount: sourceCatalog.filter((source) => source.requiresCookie).length,
+      cookieConfiguredCount: sourceCatalog.filter((source) => source.requiresCookie && source.cookieConfigured).length,
       projectReferenceCount: HOTSPOT_PROJECT_REFERENCES.length,
-      source: "orz.ai + DailyHotApi + 60s + native fetchers + local clustering",
+      source: "orz.ai + DailyHotApi + 60s + cookie-backed aggregators + native fetchers + local clustering",
     },
   };
 
   cachedPayload = { expiresAt: now + HOTSPOT_CACHE_MS, payload };
   return payload;
+}
+
+export function listHotspotSourceDefinitions(): HotspotSourceDefinition[] {
+  return SOURCES.map(toSourceDefinition);
+}
+
+export async function getHotspotSourcePayload(code: string): Promise<HotspotSourceApiPayload> {
+  const source = getSourceByCode(code);
+  const definition = toSourceDefinition(source);
+  try {
+    const items = await fetchSourceItems(source);
+    const backends = Array.from(new Set(items.map((item) => item.backend)));
+    return {
+      generatedAt: new Date().toISOString(),
+      source: definition,
+      items,
+      health: {
+        platform: source.label,
+        platformCode: source.code,
+        ok: items.length > 0,
+        count: items.length,
+        backend: backends.join(" + ") || "无数据",
+        requiresCookie: definition.requiresCookie,
+        cookieConfigured: definition.cookieConfigured,
+        message: items.length ? undefined : "接口可访问但没有返回可用条目",
+      },
+    };
+  } catch (error) {
+    return {
+      generatedAt: new Date().toISOString(),
+      source: definition,
+      items: [],
+      health: {
+        platform: source.label,
+        platformCode: source.code,
+        ok: false,
+        count: 0,
+        backend: "全部后备失败",
+        requiresCookie: definition.requiresCookie,
+        cookieConfigured: definition.cookieConfigured,
+        message: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
 }
 
 async function fetchSourceItems(source: HotspotSource): Promise<HotspotSourceItem[]> {
@@ -472,6 +621,9 @@ async function fetchSourceItems(source: HotspotSource): Promise<HotspotSourceIte
   }
   if (source.sixtyRoute) {
     attempts.push(fetchSixtySecondItems(source));
+  }
+  if (source.cookieBackend) {
+    attempts.push(fetchCookieBackendItems(source));
   }
   if (source.nativeFetcher) {
     attempts.push(source.nativeFetcher(source));
@@ -517,6 +669,38 @@ async function fetchDailyHotItems(source: HotspotSource): Promise<HotspotSourceI
 async function fetchSixtySecondItems(source: HotspotSource): Promise<HotspotSourceItem[]> {
   const json = await fetchJson<GenericHotResponse>(`${SIXTY_SECONDS_BASE}/${source.sixtyRoute}`, "60s");
   return normalizeItems(extractItemArray(json), source, "60s");
+}
+
+async function fetchCookieBackendItems(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const config = getCookieBackend(source.code);
+  if (!config) {
+    throw new Error(`${source.label} 没有 Cookie 聚合配置`);
+  }
+
+  const configuredUpstream = process.env[config.upstreamEnv];
+  const cookie = process.env[config.cookieEnv];
+  if (!configuredUpstream && !cookie) {
+    throw new Error(`${source.label} Cookie 聚合待配置：设置 ${config.cookieEnv} 或 ${config.upstreamEnv}`);
+  }
+
+  const upstream = configuredUpstream || config.defaultUrl;
+  if (!upstream) {
+    throw new Error(`${source.label} 需要配置 ${config.upstreamEnv}，或补充默认上游接口`);
+  }
+
+  const headers: Record<string, string> = {
+    Accept: "application/json,text/plain,*/*",
+  };
+  if (cookie) {
+    headers.Cookie = cookie;
+  }
+
+  const json = await fetchJson<GenericHotResponse | unknown[]>(upstream, `Cookie聚合:${source.label}`, {
+    method: config.method ?? "GET",
+    headers,
+    body: config.body,
+  });
+  return normalizeItems(extractItemArray(json), source, `Cookie聚合:${source.label}`);
 }
 
 async function fetchNativeWeibo(source: HotspotSource): Promise<HotspotSourceItem[]> {
@@ -632,16 +816,27 @@ async function fetchNativeHelloGitHub(source: HotspotSource): Promise<HotspotSou
   return normalizeItems(parseRssItems(xml), source, "HelloGitHub RSS");
 }
 
-async function fetchJson<T>(url: string, label: string): Promise<T> {
+async function fetchJson<T>(
+  url: string,
+  label: string,
+  init?: {
+    method?: "GET" | "POST";
+    headers?: Record<string, string>;
+    body?: string;
+  },
+): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(url, {
+      method: init?.method ?? "GET",
       signal: controller.signal,
       headers: {
         Accept: "application/json,text/plain,*/*",
         "User-Agent": "hot-catch/1.0 (+https://github.com/stars131/hot-catch)",
+        ...init?.headers,
       },
+      body: init?.body,
       cache: "no-store",
     });
     if (!response.ok) {
@@ -1097,6 +1292,33 @@ function seededRandom(seed: number) {
     value = (value * 1664525 + 1013904223) % 4294967296;
     return value / 4294967296;
   };
+}
+
+function toSourceDefinition(source: HotspotSource): HotspotSourceDefinition {
+  const cookieBackend = getCookieBackend(source.code);
+  return {
+    code: source.code,
+    label: source.label,
+    category: source.category,
+    apiPath: `/api/hotspots/sources/${source.code}`,
+    requiresCookie: Boolean(cookieBackend),
+    cookieConfigured: cookieBackend ? Boolean(process.env[cookieBackend.cookieEnv] || process.env[cookieBackend.upstreamEnv]) : false,
+    cookieEnv: cookieBackend?.cookieEnv,
+    upstreamEnv: cookieBackend?.upstreamEnv,
+    notes: cookieBackend?.notes,
+  };
+}
+
+function getCookieBackend(code: HotspotPlatformCode) {
+  return COOKIE_BACKENDS.find((backend) => backend.code === code);
+}
+
+function getSourceByCode(code: string) {
+  const source = SOURCES.find((item) => item.code === code);
+  if (!source) {
+    throw new Error(`未知热点源：${code}`);
+  }
+  return source;
 }
 
 function getSource(code: HotspotPlatformCode) {

@@ -125,12 +125,15 @@ type HotspotPayload = {
   platforms: HotspotPlatform[];
   topics: HotspotTopic[];
   sourceHealth: HotspotSourceHealth[];
+  sourceCatalog: unknown[];
   projectReferences: HotspotProjectReference[];
   summary: {
     totalItems: number;
     activeSources: number;
     crossPlatformTopics: number;
     backendCount: number;
+    cookieSourceCount: number;
+    cookieConfiguredCount: number;
     projectReferenceCount: number;
     source: string;
   };
