@@ -154,3 +154,17 @@
 [role="dialog"] .overflow-x-auto::-webkit-scrollbar {
   display: none;
 }
+
+/* Artifact 面板:评分警告定位时的内容块高亮 */
+@keyframes artifact-flash {
+  0% {
+    box-shadow: 0 0 0 3px rgba(200, 59, 50, 0.45);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(200, 59, 50, 0);
+  }
+}
+
+.artifact-flash {
+  animation: artifact-flash 1.6s ease-out 1;
+}

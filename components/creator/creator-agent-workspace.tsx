@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { FileText } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { CreatorShell } from "@/components/creator/creator-shell";
 import { ConversationSidebar } from "@/components/creator/conversation-sidebar";
 import {
@@ -13,6 +15,8 @@ import {
   type ComposerContextChip,
 } from "@/components/creator/creator-composer";
 import type { InvokeCardAction } from "@/components/creator/cards/card-renderer";
+import { ArtifactPanel } from "@/components/creator/artifact/artifact-panel";
+import type { ArtifactCard } from "@/lib/creator/chat-protocol";
 import {
   actionKeyOf,
   cancelRun,
@@ -96,6 +100,9 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
   const [chips, setChips] = useState<ComposerContextChip[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [artifactContentId, setArtifactContentId] = useState<string | null>(null);
+  const [lastArtifactContentId, setLastArtifactContentId] = useState<string | null>(null);
+  const seenArtifactCardIdsRef = useRef<Set<string> | null>(null);
   const localEchoRef = useRef(0);
   const busyRef = useRef(false);
 
@@ -127,6 +134,32 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
     },
     [],
   );
+
+  // 切换会话时关闭 Artifact 面板,重置自动打开记录
+  useEffect(() => {
+    setArtifactContentId(null);
+    setLastArtifactContentId(null);
+    seenArtifactCardIdsRef.current = null;
+  }, [conversationId]);
+
+  // 新成果卡出现时自动打开 Artifact(刷新恢复的历史卡不自动打开;用户可随时关闭)
+  useEffect(() => {
+    if (threadState !== "ready") return;
+    const cards = messages.flatMap((message) =>
+      message.cards.filter((card): card is ArtifactCard => card.type === "artifact"),
+    );
+    if (seenArtifactCardIdsRef.current === null) {
+      seenArtifactCardIdsRef.current = new Set(cards.map((card) => card.id));
+      return;
+    }
+    const seen = seenArtifactCardIdsRef.current;
+    const fresh = cards.find((card) => !seen.has(card.id));
+    cards.forEach((card) => seen.add(card.id));
+    if (fresh) {
+      setArtifactContentId(fresh.contentId);
+      setLastArtifactContentId(fresh.contentId);
+    }
+  }, [messages, threadState]);
 
   // URL -> 会话恢复(pending/failed 状态直接来自数据库)。
   // 发送期间跳过:懒创建会触发 URL 变化,发送流程自己负责落地消息,避免竞态清空本地回显。
@@ -299,11 +332,30 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
     }
     if (entry.prefill) {
       setComposerValue(entry.prefill);
-      document
-        .querySelector<HTMLTextAreaElement>('textarea[aria-label="创作输入框"]')
-        ?.focus();
+      focusComposer();
     }
   }
+
+  function focusComposer() {
+    document
+      .querySelector<HTMLTextAreaElement>('textarea[aria-label="创作输入框"]')
+      ?.focus();
+  }
+
+  function handleArtifactOpen(card: ArtifactCard) {
+    setArtifactContentId(card.contentId);
+    setLastArtifactContentId(card.contentId);
+    seenArtifactCardIdsRef.current?.add(card.id);
+  }
+
+  function handleArtifactRefine(card: ArtifactCard) {
+    setComposerValue(`请继续优化「${card.title}」(当前 v${card.revisionNumber}):`);
+    focusComposer();
+  }
+
+  const handleJobSettled = useCallback(() => {
+    if (conversationId) void reloadMessages(conversationId);
+  }, [conversationId, reloadMessages]);
 
   function handleStartNew() {
     setComposerValue("");
@@ -325,6 +377,17 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
       </span>
       {busy ? (
         <span className="shrink-0 text-[11px] text-[#C83B32]">生成中</span>
+      ) : null}
+      {lastArtifactContentId && !artifactContentId ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="ml-auto h-7 shrink-0 rounded-lg border-[#DDD7CE] px-2 text-[11px]"
+          onClick={() => setArtifactContentId(lastArtifactContentId)}
+          data-testid="topbar-open-artifact"
+        >
+          <FileText className="h-3.5 w-3.5" /> 打开作品
+        </Button>
       ) : null}
     </div>
   );
@@ -368,6 +431,14 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
       onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
       drawerOpen={drawerOpen}
       onDrawerOpenChange={setDrawerOpen}
+      artifact={
+        artifactContentId ? (
+          <ArtifactPanel
+            contentId={artifactContentId}
+            onClose={() => setArtifactContentId(null)}
+          />
+        ) : undefined
+      }
     >
       <ConversationThread
         messages={messages}
@@ -382,6 +453,9 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
         onInvokeAction={handleInvokeAction}
         onRetry={handleRetry}
         onCancelRun={(runId) => void handleCancelRun(runId)}
+        onArtifactOpen={handleArtifactOpen}
+        onArtifactRefine={handleArtifactRefine}
+        onJobSettled={handleJobSettled}
       />
     </CreatorShell>
   );

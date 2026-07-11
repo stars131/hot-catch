@@ -50,22 +50,39 @@ export async function getContentProject(userId: string, contentId: string) {
       scoringRubric: true,
       revisions: { orderBy: { revisionNumber: "desc" } },
       publishRecords: { orderBy: { createdAt: "desc" } },
+      contentReferences: {
+        orderBy: { createdAt: "asc" },
+        select: { id: true, role: true, sourceUrl: true, snapshot: true, createdAt: true },
+      },
     },
   });
   if (!content) throw new AppError("NOT_FOUND", "内容项目不存在。", 404);
   return content;
 }
 
+type RevisionOptions = {
+  /** Worker 生成版本的幂等键;重试命中唯一约束时复用既有版本。 */
+  originJobId?: string;
+  /** 服务端生成的来源说明(如恢复自哪个版本);不接受客户端提交。 */
+  provenance?: Prisma.InputJsonValue;
+};
+
 export async function createContentRevision(
   userId: string,
   contentId: string,
   input: CreateRevisionInput,
+  options: RevisionOptions = {},
 ) {
   const content = await prisma.generatedContent.findFirst({
     where: { id: contentId, userId },
     select: { id: true },
   });
   if (!content) throw new AppError("NOT_FOUND", "内容项目不存在。", 404);
+
+  if (options.originJobId) {
+    const replayed = await findRevisionByOriginJob(userId, contentId, options.originJobId);
+    if (replayed) return replayed;
+  }
 
   const structuredContent = toJson(input.structuredContent);
   const checksum = createHash("sha256")
@@ -97,6 +114,8 @@ export async function createContentRevision(
             structuredContent,
             fullMarkdown: input.fullMarkdown,
             checksum,
+            originJobId: options.originJobId,
+            provenance: options.provenance,
           },
         });
         await tx.generatedContent.update({
@@ -112,12 +131,62 @@ export async function createContentRevision(
         return revision;
       });
     } catch (error) {
-      const isRevisionRace =
+      const isUniqueViolation =
         error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
-      if (!isRevisionRace || attempt === 1) throw error;
+      if (!isUniqueViolation) throw error;
+      // originJobId 撞唯一约束 = Worker 重试,直接复用既有版本
+      if (options.originJobId) {
+        const replayed = await findRevisionByOriginJob(userId, contentId, options.originJobId);
+        if (replayed) return replayed;
+      }
+      // 否则是 revisionNumber 并发竞争,重试一次
+      if (attempt === 1) throw error;
     }
   }
   throw new AppError("CONFLICT", "版本保存冲突，请重试。", 409);
+}
+
+/**
+ * 恢复版本:payload 全部来自数据库中被选中的 revision,
+ * 不接受客户端提交的正文,杜绝旧闭包草稿覆盖恢复内容。
+ */
+export async function restoreContentRevision(
+  userId: string,
+  contentId: string,
+  fromRevisionId: string,
+) {
+  const source = await prisma.contentRevision.findFirst({
+    where: { id: fromRevisionId, contentId, userId },
+  });
+  if (!source) throw new AppError("NOT_FOUND", "要恢复的版本不存在。", 404);
+  return createContentRevision(
+    userId,
+    contentId,
+    {
+      source: "restored",
+      title: source.title,
+      bodyText: source.bodyText,
+      structuredContent: source.structuredContent ?? undefined,
+      fullMarkdown: source.fullMarkdown,
+    },
+    {
+      provenance: {
+        restoredFromRevisionId: source.id,
+        restoredFromRevisionNumber: source.revisionNumber,
+      },
+    },
+  );
+}
+
+async function findRevisionByOriginJob(
+  userId: string,
+  contentId: string,
+  originJobId: string,
+) {
+  const existing = await prisma.contentRevision.findUnique({ where: { originJobId } });
+  return existing && existing.userId === userId && existing.contentId === contentId
+    ? existing
+    : null;
 }
 
 async function assertOwnedRelations(

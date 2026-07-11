@@ -27,3 +27,16 @@ export const createRevisionSchema = z.object({
   structuredContent: z.unknown().optional(),
   fullMarkdown: z.string().max(150000).nullable().optional(),
 });
+
+/** 恢复版本:客户端只提交来源版本 ID,payload 一律由服务端从该版本读取。 */
+export const restoreRevisionSchema = z
+  .object({
+    source: z.literal("restored"),
+    fromRevisionId: z.string().cuid(),
+  })
+  .strict();
+
+export const revisionRequestSchema = z.union([
+  restoreRevisionSchema,
+  createRevisionSchema,
+]);

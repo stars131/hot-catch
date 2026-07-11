@@ -5,6 +5,7 @@ import {
   createContentProject,
   createContentRevision,
   getContentProject,
+  restoreContentRevision,
 } from "@/lib/services/content-project-service";
 
 const runId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -79,5 +80,83 @@ describe("idea to versioned content", () => {
     await expect(
       createContentRevision(userBId, content.id, { source: "manual", title: "越权版本" }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("restores a revision from its stored payload, never from client state", async () => {
+    const content = await createContentProject(userAId, {
+      platform: "xiaohongshu",
+      contentKind: "xhs_graphic",
+      title: "恢复测试",
+    });
+    const revision1 = await createContentRevision(userAId, content.id, {
+      source: "generated",
+      title: "版本一标题",
+      bodyText: "版本一正文",
+      structuredContent: { title: "版本一标题", bodyText: "版本一正文", pages: [] },
+      fullMarkdown: "# 版本一标题",
+    });
+    const revision2 = await createContentRevision(userAId, content.id, {
+      source: "manual",
+      title: "版本二标题",
+      bodyText: "版本二正文",
+      structuredContent: { title: "版本二标题", bodyText: "版本二正文", pages: [] },
+      fullMarkdown: "# 版本二标题",
+    });
+    expect(revision2.revisionNumber).toBe(2);
+
+    // 恢复 v1:新版本 payload 必须来自 v1 数据库记录
+    const restored = await restoreContentRevision(userAId, content.id, revision1.id);
+    expect(restored.revisionNumber).toBe(3);
+    expect(restored.source).toBe("restored");
+    expect(restored.title).toBe("版本一标题");
+    expect(restored.bodyText).toBe("版本一正文");
+    expect(restored.provenance).toMatchObject({
+      restoredFromRevisionId: revision1.id,
+      restoredFromRevisionNumber: 1,
+    });
+
+    // 主表同步为恢复后的内容
+    const project = await getContentProject(userAId, content.id);
+    expect(project.title).toBe("版本一标题");
+    expect(project.revisions).toHaveLength(3);
+
+    // 跨用户恢复被拒绝
+    await expect(
+      restoreContentRevision(userBId, content.id, revision1.id),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    // 其他内容项目的版本不能被拿来恢复本项目
+    const otherContent = await createContentProject(userAId, {
+      platform: "xiaohongshu",
+      contentKind: "xhs_graphic",
+      title: "另一个项目",
+    });
+    await expect(
+      restoreContentRevision(userAId, otherContent.id, revision1.id),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("reuses the same revision when a worker retries with one originJobId", async () => {
+    const content = await createContentProject(userAId, {
+      platform: "douyin",
+      contentKind: "douyin_video_script",
+      title: "重试幂等",
+    });
+    const originJobId = `job-${runId}`;
+    const first = await createContentRevision(
+      userAId,
+      content.id,
+      { source: "generated", title: "生成稿", bodyText: "正文" },
+      { originJobId },
+    );
+    const retried = await createContentRevision(
+      userAId,
+      content.id,
+      { source: "generated", title: "生成稿", bodyText: "正文" },
+      { originJobId },
+    );
+    expect(retried.id).toBe(first.id);
+    const count = await prisma.contentRevision.count({ where: { contentId: content.id } });
+    expect(count).toBe(1);
   });
 });

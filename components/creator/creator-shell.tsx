@@ -7,14 +7,16 @@ import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/s
 import { cn } from "@/lib/utils";
 
 /**
- * 创作专用壳层:左侧可折叠会话栏 + 居中消息主区 + 底部 Composer。
+ * 创作专用壳层:左侧可折叠会话栏 + 居中消息主区 + 底部 Composer + 可选 Artifact 面板。
  * 不复用后台式 AppShell;≥1180px 显示常驻侧栏,窄屏用 Drawer。
+ * Artifact 在 ≥1180px 作为右侧栏,窄屏/手机全屏覆盖主区(单实例,同一节点切换定位)。
  */
 export function CreatorShell(props: {
   sidebar: ReactNode;
   topbar: ReactNode;
   children: ReactNode;
   composer: ReactNode;
+  artifact?: ReactNode;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   drawerOpen: boolean;
@@ -79,6 +81,21 @@ export function CreatorShell(props: {
           {props.composer}
         </div>
       </div>
+
+      {props.artifact ? (
+        <section
+          className={cn(
+            "min-h-0 bg-[#FFFDF9]",
+            // <1180px:全屏覆盖主区(手机一次只显示对话或 Artifact)
+            "fixed inset-0 z-40 flex flex-col",
+            // ≥1180px:回到文档流,作为右侧栏
+            "min-[1180px]:static min-[1180px]:z-auto min-[1180px]:w-[560px] min-[1180px]:shrink-0 min-[1180px]:border-l min-[1180px]:border-[#DDD7CE] min-[1440px]:w-[640px]",
+          )}
+          data-testid="artifact-panel-container"
+        >
+          {props.artifact}
+        </section>
+      ) : null}
     </div>
   );
 }

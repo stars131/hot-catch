@@ -58,3 +58,23 @@ docker compose --env-file deploy/.env.production -f deploy/docker-compose.prod.y
 ## 临时媒体与隐私
 
 Worker 的 `/tmp/startrace` 使用 2 GB tmpfs；任务成功、失败都会执行应用层清理，容器重启也不会留下原视频。生产库仅保存来源链接、转写、分析和证据。生产环境不会读取 `.hotspot-cookies.local.json`，Cookie 进入用户级加密凭证。
+
+## 本地 E2E 运行要求(C4/C5 验证基线)
+
+Playwright 会自行启动 `next dev -p 3100`(带 `DEV_AUTH_BYPASS=1`),但有两个本机前提:
+
+1. **代理放行本机回环**。本机若开启 Clash 类代理(`HTTP_PROXY/HTTPS_PROXY`),健康检查会被代理挂住导致 180 秒假超时,必须以 `NO_PROXY='127.0.0.1,localhost'` 前缀运行。
+2. **BullMQ Worker 是独立进程**,涉及导入/生成任务的用例(如 `creator-reference.spec.ts`)需要先手动启动 Worker;`tsx` 不读取 `.env`,需显式传入连接串:
+
+```bash
+# 终端 1:Worker(仅任务类用例需要;creator-artifact.spec.ts 纯 API+DB,可不启动)
+DATABASE_URL="postgresql://xhs:xhs_password@127.0.0.1:5432/xhs_benchmark?schema=public" \
+REDIS_URL="redis://127.0.0.1:6379" \
+URL_GUARD_ALLOWLIST="127.0.0.1" \
+NO_PROXY='127.0.0.1,localhost' npm run worker
+
+# 终端 2:全量 E2E
+NO_PROXY='127.0.0.1,localhost' npm run test:e2e
+```
+
+另注意:`playwright.config.ts` 的 `reuseExistingServer` 在非 CI 下为 true,若 3100 端口残留旧代码的 dev server,会导致新接口 500;跑测试前确认 3100 未被旧进程占用。开发库按 CONTEXT.md 走 `prisma db push`,不要在本机执行 `migrate dev`(会因迁移记账缺失要求 reset)。

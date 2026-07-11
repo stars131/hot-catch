@@ -9,6 +9,7 @@ import {
   xhsGraphicOutputSchema,
 } from "@/lib/content/schemas";
 import { createContentRevision } from "@/lib/services/content-project-service";
+import { toDouyinMarkdown, toXhsMarkdown } from "@/lib/content/markdown";
 import { scoreContentProject } from "@/lib/services/scoring-service";
 import { CHAT_PROTOCOL } from "@/lib/creator/chat-protocol";
 import { chatMessageMetadataV1Schema } from "@/lib/creator/chat-schemas";
@@ -94,13 +95,18 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
         prompt: `${JSON.stringify(context)}\n生成标题候选、封面文案、逐页图文、完整正文、标签、互动收尾和风险说明。`,
         schema: xhsGraphicOutputSchema,
       });
-      const revision = await createContentRevision(payload.userId, content.id, {
-        source: "generated",
-        title: generated.title,
-        bodyText: generated.bodyText,
-        structuredContent: generated,
-        fullMarkdown: toXhsMarkdown(generated),
-      });
+      const revision = await createContentRevision(
+        payload.userId,
+        content.id,
+        {
+          source: "generated",
+          title: generated.title,
+          bodyText: generated.bodyText,
+          structuredContent: generated,
+          fullMarkdown: toXhsMarkdown(generated),
+        },
+        { originJobId: payload.databaseJobId },
+      );
       await prisma.generatedContent.update({
         where: { id: content.id },
         data: {
@@ -143,13 +149,18 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
       prompt: `${JSON.stringify(context)}\n生成 10–180 秒的原创短视频脚本，第一镜从 0 秒开始，最后一镜结束时间等于总时长。`,
       schema: douyinVideoScriptOutputSchema,
     });
-    const revision = await createContentRevision(payload.userId, content.id, {
-      source: "generated",
-      title: generated.title,
-      bodyText: generated.caption,
-      structuredContent: generated,
-      fullMarkdown: toDouyinMarkdown(generated),
-    });
+    const revision = await createContentRevision(
+      payload.userId,
+      content.id,
+      {
+        source: "generated",
+        title: generated.title,
+        bodyText: generated.caption,
+        structuredContent: generated,
+        fullMarkdown: toDouyinMarkdown(generated),
+      },
+      { originJobId: payload.databaseJobId },
+    );
     await prisma.generatedContent.update({
       where: { id: content.id },
       data: {
@@ -191,17 +202,6 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
   }
 };
 
-function toXhsMarkdown(value: { title: string; pages: Array<{ pageNumber: number; heading: string; body: string }>; bodyText: string; tags: string[] }) {
-  return [`# ${value.title}`, ...value.pages.map((page) => `## 第 ${page.pageNumber} 页：${page.heading}\n\n${page.body}`), value.bodyText, value.tags.map((tag) => `#${tag}`).join(" ")].join("\n\n");
-}
-
-function toDouyinMarkdown(value: { title: string; shots: Array<{ startSec: number; endSec: number; voiceover: string; visual: string; subtitle: string; camera: string; transition: string; music: string; risk?: string }>; caption: string; tags: string[] }) {
-  const rows = value.shots.map(
-    (shot) => `| ${shot.startSec}-${shot.endSec}s | ${shot.voiceover} | ${shot.visual} | ${shot.subtitle} | ${shot.camera} | ${shot.transition} | ${shot.music} | ${shot.risk || "无"} |`,
-  );
-  return [`# ${value.title}`, "| 时间 | 口播 | 画面 | 字幕 | 镜头 | 转场 | 音乐 | 风险 |", "| --- | --- | --- | --- | --- | --- | --- | --- |", ...rows, value.caption, value.tags.map((tag) => `#${tag}`).join(" ")].join("\n\n");
-}
-
 /** 生成成功后把 ArtifactCard 写回会话;按 jobId 幂等,Worker 重试不重复发消息。 */
 async function appendArtifactMessage(params: {
   userId: string;
@@ -237,7 +237,8 @@ async function appendArtifactMessage(params: {
         preview: params.preview,
         score: params.score,
         actions: [
-          { actionId: "artifact.open", label: "打开编辑", appearance: "primary" },
+          { actionId: "artifact.open", label: "打开编辑", appearance: "primary", repeatable: true },
+          { actionId: "artifact.refine", label: "继续优化", repeatable: true },
         ],
       },
     ],

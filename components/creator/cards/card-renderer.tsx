@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { ChatCard } from "@/lib/creator/chat-protocol";
+import type { ArtifactCard, ChatCard } from "@/lib/creator/chat-protocol";
 import { actionKeyOf } from "@/lib/creator/conversation-client";
 import { OptionCardView } from "@/components/creator/cards/option-card";
 import { NoticeCardView } from "@/components/creator/cards/notice-card";
@@ -40,6 +40,12 @@ export function CardRenderer(props: {
   sourceMessageId: string;
   processedKeys: string[];
   onInvoke: InvokeCardAction;
+  /** 成果卡「打开编辑」的本地处理(打开 Artifact 面板),不回传服务端 */
+  onArtifactOpen?: (card: ArtifactCard) => void;
+  /** 成果卡「继续优化」的本地处理(预填输入框),不回传服务端 */
+  onArtifactRefine?: (card: ArtifactCard) => void;
+  /** 进度卡对应任务进入终态时通知(用于刷新消息流,接收成果卡) */
+  onJobSettled?: () => void;
 }) {
   const [state, setState] = useState<CardInvokeState>({ phase: "idle" });
   const processed = processedActionIds(props.card, props.processedKeys);
@@ -86,7 +92,7 @@ export function CardRenderer(props: {
         />
       );
     case "progress":
-      return <ProgressCardView card={props.card} />;
+      return <ProgressCardView card={props.card} onSettled={props.onJobSettled} />;
     case "reference":
       return (
         <ReferenceCardView
@@ -102,6 +108,8 @@ export function CardRenderer(props: {
           card={props.card}
           state={state}
           onInvoke={(actionId) => void invoke(actionId)}
+          onOpen={props.onArtifactOpen}
+          onRefine={props.onArtifactRefine}
         />
       );
     case "approval":

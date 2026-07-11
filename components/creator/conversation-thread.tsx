@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import type { ArtifactCard } from "@/lib/creator/chat-protocol";
 import type { ActiveRun, ThreadMessage } from "@/lib/creator/conversation-client";
 import {
   CardRenderer,
@@ -49,6 +50,9 @@ export function ConversationThread(props: {
   onInvokeAction: InvokeCardAction;
   onRetry: (message: ThreadMessage) => void;
   onCancelRun: (runId: string) => void;
+  onArtifactOpen?: (card: ArtifactCard) => void;
+  onArtifactRefine?: (card: ArtifactCard) => void;
+  onJobSettled?: () => void;
 }) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -167,6 +171,9 @@ export function ConversationThread(props: {
                     sourceMessageId={message.id}
                     processedKeys={props.processedKeys}
                     onInvoke={props.onInvokeAction}
+                    onArtifactOpen={props.onArtifactOpen}
+                    onArtifactRefine={props.onArtifactRefine}
+                    onJobSettled={props.onJobSettled}
                   />
                 ))}
               </div>

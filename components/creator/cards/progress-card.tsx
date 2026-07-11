@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Loader2, PauseCircle, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -17,10 +17,17 @@ type JobView = {
 const TERMINAL = ["succeeded", "failed", "canceled"];
 
 /** 进度卡:轮询既有 /api/jobs/:id(2 秒),终态停止;waiting_input 内联提示。 */
-export function ProgressCardView(props: { card: ProgressCardType }) {
+export function ProgressCardView(props: {
+  card: ProgressCardType;
+  /** 任务由进行中转入终态时通知一次(刷新后已是终态的不触发) */
+  onSettled?: () => void;
+}) {
   const [job, setJob] = useState<JobView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [canceling, setCanceling] = useState(false);
+  const onSettledRef = useRef(props.onSettled);
+  const previousStatusRef = useRef<JobView["status"] | null>(null);
+  onSettledRef.current = props.onSettled;
 
   useEffect(() => {
     let stopped = false;
@@ -33,6 +40,15 @@ export function ProgressCardView(props: { card: ProgressCardType }) {
         if (stopped) return;
         setJob(data.job);
         setLoadError(null);
+        const previous = previousStatusRef.current;
+        previousStatusRef.current = data.job.status;
+        if (
+          previous &&
+          !TERMINAL.includes(previous) &&
+          TERMINAL.includes(data.job.status)
+        ) {
+          onSettledRef.current?.();
+        }
         if (!TERMINAL.includes(data.job.status) && data.job.status !== "waiting_input") {
           timer = window.setTimeout(() => void poll(), 2000);
         }

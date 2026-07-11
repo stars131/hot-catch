@@ -346,7 +346,7 @@ export const ACTION_REGISTRY: Record<string, ActionHandler> = {
     }),
   },
 
-  /** 成果卡:打开编辑(编辑器 C5 上线;如实说明,不假成功) */
+  /** 成果卡:打开编辑(面板由客户端本地打开;此处是 API 直连时的兜底说明) */
   "artifact.open": {
     repeatable: true,
     execute: async (context) => {
@@ -354,7 +354,20 @@ export const ACTION_REGISTRY: Record<string, ActionHandler> = {
         throw new AppError("VALIDATION_ERROR", "该动作只能由成果卡触发。", 400);
       }
       return {
-        text: `「${context.card.title}」已保存为版本 v${context.card.revisionNumber};独立编辑器将在下一批次上线,当前可先在对话中继续提出修改要求。`,
+        text: `「${context.card.title}」当前为版本 v${context.card.revisionNumber}。在创作页点击成果卡上的「打开编辑」即可在右侧编辑器中查看内容、结构、评分与证据。`,
+      };
+    },
+  },
+
+  /** 成果卡:继续优化(客户端会把意图预填到输入框;此处是 API 直连时的兜底说明) */
+  "artifact.refine": {
+    repeatable: true,
+    execute: async (context) => {
+      if (context.card.type !== "artifact") {
+        throw new AppError("VALIDATION_ERROR", "该动作只能由成果卡触发。", 400);
+      }
+      return {
+        text: `想继续优化「${context.card.title}」,请直接在对话中描述要修改的方向,例如“把开头改得更具体”或“压缩第 3 页”。`,
       };
     },
   },
