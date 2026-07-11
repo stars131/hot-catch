@@ -152,3 +152,26 @@ function normalizeExcerpt(value: string | undefined): string {
     ? `${trimmed.slice(0, EXCERPT_MAX_LENGTH)}…`
     : trimmed;
 }
+
+/**
+ * 把编辑器区块引用映射为 content.propose_patch 的目标区块。
+ * cover/tags/risk 是列表或选项型字段,暂不支持补丁提案,返回 null,
+ * 调用方回退为普通对话预填。
+ */
+export function patchSectionOf(
+  section: ArtifactSectionRef,
+): { kind: "title" | "body" | "hook" | "interaction" | "page" | "shot"; index?: number } | null {
+  switch (section.kind) {
+    case "title":
+    case "body":
+    case "hook":
+    case "interaction":
+      return { kind: section.kind };
+    case "page":
+      return { kind: "page", index: section.index };
+    case "shot":
+      return { kind: "shot", index: section.index };
+    default:
+      return null;
+  }
+}

@@ -15,8 +15,14 @@ import {
   type ComposerContextChip,
 } from "@/components/creator/creator-composer";
 import type { InvokeCardAction } from "@/components/creator/cards/card-renderer";
-import { ArtifactPanel } from "@/components/creator/artifact/artifact-panel";
-import type { ArtifactCard } from "@/lib/creator/chat-protocol";
+import {
+  ArtifactPanel,
+  type ArtifactPendingInsert,
+  type ArtifactRefineRequest,
+} from "@/components/creator/artifact/artifact-panel";
+import type { ArtifactCard, PatchCard } from "@/lib/creator/chat-protocol";
+import type { PatchTarget } from "@/lib/creator/chat-schemas";
+import type { SkillMenuItem } from "@/lib/creator/skill-registry";
 import {
   actionKeyOf,
   cancelRun,
@@ -102,6 +108,12 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [artifactContentId, setArtifactContentId] = useState<string | null>(null);
   const [lastArtifactContentId, setLastArtifactContentId] = useState<string | null>(null);
+  /** 选中区块修改目标:发送消息时随 context 提交,服务端生成补丁提案卡 */
+  const [patchTarget, setPatchTarget] = useState<(PatchTarget & { label: string }) | null>(
+    null,
+  );
+  const [pendingInsert, setPendingInsert] = useState<ArtifactPendingInsert | null>(null);
+  const insertNonceRef = useRef(0);
   const seenArtifactCardIdsRef = useRef<Set<string> | null>(null);
   const localEchoRef = useRef(0);
   const busyRef = useRef(false);
@@ -135,10 +147,12 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
     [],
   );
 
-  // 切换会话时关闭 Artifact 面板,重置自动打开记录
+  // 切换会话时关闭 Artifact 面板,重置自动打开记录与修改目标
   useEffect(() => {
     setArtifactContentId(null);
     setLastArtifactContentId(null);
+    setPatchTarget(null);
+    setPendingInsert(null);
     seenArtifactCardIdsRef.current = null;
   }, [conversationId]);
 
@@ -258,7 +272,17 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
           query.set("conversationId", created.id);
           router.replace(`${pathname}?${query.toString()}`, { scroll: false });
         }
-        const result = await sendMessage(activeId, text);
+        // 选中区块修改目标只随本条消息提交一次;label 仅用于本地 Chip 展示
+        const target = patchTarget
+          ? {
+              contentId: patchTarget.contentId,
+              section: patchTarget.section,
+              ...(patchTarget.excerpt ? { excerpt: patchTarget.excerpt } : {}),
+              ...(patchTarget.skillId ? { skillId: patchTarget.skillId } : {}),
+            }
+          : undefined;
+        const result = await sendMessage(activeId, text, { patchTarget: target });
+        setPatchTarget(null);
         setMessages((current) => [
           ...current.filter((message) => message.id !== echoId),
           result.userMessage,
@@ -283,7 +307,7 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
         busyRef.current = false;
       }
     },
-    [busy, conversationId, pathname, refreshList, router, searchParams],
+    [busy, conversationId, patchTarget, pathname, refreshList, router, searchParams],
   );
 
   async function handleSend() {
@@ -354,12 +378,51 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
   }
 
   /**
-   * Artifact 编辑器内「让星迹修改」:把区块修改指令预填到 Composer。
+   * Artifact 编辑器内「让星迹修改」:预填指令并记录修改目标;
+   * 发送后服务端会生成 content.propose_patch 提案卡(target 缺失时退回普通对话)。
    * <1180px 时 Artifact 全屏覆盖对话,先收起面板让用户看到输入框;
    * 桌面保持面板打开,便于边看内容边补全指令。
    */
-  function handleArtifactAskRefine(instruction: string) {
-    setComposerValue(instruction);
+  function handleArtifactAskRefine(request: ArtifactRefineRequest) {
+    setComposerValue(request.instruction);
+    setPatchTarget(
+      request.target ? { ...request.target, label: request.sectionLabel } : null,
+    );
+    const desktop = window.matchMedia("(min-width: 1180px)").matches;
+    if (!desktop) setArtifactContentId(null);
+    window.setTimeout(focusComposer, desktop ? 0 : 80);
+  }
+
+  /** Composer 技能菜单:预填指令模板;已有修改目标时把 skillId 绑定到该目标。 */
+  function handlePickSkill(skill: SkillMenuItem) {
+    const sectionLabel = patchTarget?.label ?? "选中的区块";
+    setComposerValue(skill.composerTemplate.replace("{section}", sectionLabel));
+    setPatchTarget((current) => (current ? { ...current, skillId: skill.id } : current));
+    focusComposer();
+  }
+
+  /** 补丁卡「复制到编辑器」:打开对应作品并把提案写入草稿(客户端本地)。 */
+  function handlePatchCopyToEditor(card: PatchCard) {
+    setArtifactContentId(card.contentId);
+    setLastArtifactContentId(card.contentId);
+    setPendingInsert({
+      nonce: ++insertNonceRef.current,
+      section: card.section,
+      before: card.before,
+      after: card.after,
+    });
+  }
+
+  /** 补丁卡「再改一次」:带同一区块上下文回到输入框。 */
+  function handlePatchRefineAgain(card: PatchCard) {
+    setPatchTarget({
+      contentId: card.contentId,
+      section: card.section,
+      excerpt: card.before.slice(0, 500),
+      skillId: card.skillId,
+      label: card.sectionLabel,
+    });
+    setComposerValue(`请再修改${card.sectionLabel}:`);
     const desktop = window.matchMedia("(min-width: 1180px)").matches;
     if (!desktop) setArtifactContentId(null);
     window.setTimeout(focusComposer, desktop ? 0 : 80);
@@ -427,10 +490,19 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
           platform={platform}
           value={composerValue}
           busy={busy}
-          chips={chips}
+          chips={
+            patchTarget
+              ? [...chips, { id: "patch-target", kind: "patch" as const, label: patchTarget.label }]
+              : chips
+          }
           onChange={setComposerValue}
           onSend={() => void handleSend()}
+          onPickSkill={handlePickSkill}
           onRemoveChip={(id) => {
+            if (id === "patch-target") {
+              setPatchTarget(null);
+              return;
+            }
             setChips((current) => current.filter((chip) => chip.id !== id));
             if (contentId === id) {
               navigate(platform, { conversationId });
@@ -449,6 +521,7 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
             contentId={artifactContentId}
             onClose={() => setArtifactContentId(null)}
             onAskRefine={handleArtifactAskRefine}
+            pendingInsert={pendingInsert}
           />
         ) : undefined
       }
@@ -468,6 +541,8 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
         onCancelRun={(runId) => void handleCancelRun(runId)}
         onArtifactOpen={handleArtifactOpen}
         onArtifactRefine={handleArtifactRefine}
+        onPatchCopyToEditor={handlePatchCopyToEditor}
+        onPatchRefineAgain={handlePatchRefineAgain}
         onJobSettled={handleJobSettled}
       />
     </CreatorShell>

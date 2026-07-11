@@ -4,10 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Link2, Plus, Puzzle, Send, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { listSkillMenuItems, type SkillMenuItem } from "@/lib/creator/skill-registry";
 
 export type ComposerContextChip = {
   id: string;
-  kind: "idea" | "content";
+  kind: "idea" | "content" | "patch";
   label: string;
 };
 
@@ -22,11 +23,15 @@ export function CreatorComposer(props: {
   onSend: () => void;
   onRemoveChip: (id: string) => void;
   onSwitchPlatform: (platform: "xiaohongshu" | "douyin") => void;
+  /** 从技能菜单选择内置 Skill(star-skill/v1 manifest 驱动) */
+  onPickSkill?: (skill: SkillMenuItem) => void;
 }) {
   const [plusOpen, setPlusOpen] = useState(false);
+  const [skillsOpen, setSkillsOpen] = useState(false);
   const [platformOpen, setPlatformOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const plusButtonRef = useRef<HTMLButtonElement | null>(null);
 
   // 自适应高度,约 8 行后内部滚动
   useEffect(() => {
@@ -40,12 +45,28 @@ export function CreatorComposer(props: {
     function onPointerDown(event: PointerEvent) {
       if (!rootRef.current?.contains(event.target as Node)) {
         setPlusOpen(false);
+        setSkillsOpen(false);
         setPlatformOpen(false);
       }
     }
     window.addEventListener("pointerdown", onPointerDown);
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, []);
+
+  // Esc 只关闭菜单并把焦点还给触发按钮,不影响外层(如 Artifact 面板)
+  useEffect(() => {
+    if (!plusOpen && !platformOpen) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      setPlusOpen(false);
+      setSkillsOpen(false);
+      setPlatformOpen(false);
+      plusButtonRef.current?.focus();
+    }
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [plusOpen, platformOpen]);
 
   const canSend = props.value.trim().length > 0 && !props.busy;
 
@@ -59,7 +80,7 @@ export function CreatorComposer(props: {
               className="inline-flex max-w-full items-center gap-1 rounded-lg border border-[#DDD7CE] bg-[#FFFDF9] py-1 pl-2.5 pr-1 text-xs text-[#1F1D19]"
             >
               <span className="truncate">
-                {chip.kind === "idea" ? "选题:" : "项目:"}
+                {chip.kind === "idea" ? "选题:" : chip.kind === "patch" ? "修改:" : "项目:"}
                 {chip.label}
               </span>
               <button
@@ -93,28 +114,32 @@ export function CreatorComposer(props: {
         />
 
         <div className="absolute inset-x-2 bottom-2 flex items-center gap-1">
-          {/* + 菜单:未实现能力明确标注,不假装成功 */}
+          {/* + 菜单:技能来自内置 Skill Registry;未实现能力明确标注,不假装成功 */}
           <div className="relative">
             <Button
+              ref={plusButtonRef}
               type="button"
               variant="ghost"
               size="icon"
               className="rounded-lg text-[#746F67] hover:bg-[#EDE9E0] hover:text-[#1F1D19]"
-              aria-label="添加资料"
+              aria-label="添加资料或技能"
               aria-expanded={plusOpen}
               onClick={() => {
                 setPlusOpen((open) => !open);
+                setSkillsOpen(false);
                 setPlatformOpen(false);
               }}
             >
               <Plus className="h-5 w-5" />
             </Button>
             {plusOpen ? (
-              <div className="absolute bottom-11 left-0 z-20 w-52 rounded-xl border border-[#DDD7CE] bg-[#FFFDF9] p-1.5 shadow-[0_8px_24px_rgba(31,29,25,0.12)]">
+              <div
+                className="absolute bottom-11 left-0 z-20 w-64 rounded-xl border border-[#DDD7CE] bg-[#FFFDF9] p-1.5 shadow-[0_8px_24px_rgba(31,29,25,0.12)]"
+                data-testid="composer-plus-menu"
+              >
                 {[
                   { icon: Upload, label: "上传素材" },
                   { icon: Link2, label: "导入链接" },
-                  { icon: Puzzle, label: "技能" },
                 ].map((item) => (
                   <button
                     key={item.label}
@@ -129,6 +154,51 @@ export function CreatorComposer(props: {
                     </span>
                   </button>
                 ))}
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-[#1F1D19] hover:bg-[#EDE9E0]"
+                  aria-expanded={skillsOpen}
+                  data-testid="composer-skills-toggle"
+                  onClick={() => setSkillsOpen((open) => !open)}
+                >
+                  <Puzzle className="h-4 w-4" />
+                  技能
+                  <ChevronDown
+                    className={cn(
+                      "ml-auto h-3.5 w-3.5 text-[#746F67] transition-transform",
+                      skillsOpen ? "rotate-0" : "-rotate-90",
+                    )}
+                    aria-hidden
+                  />
+                </button>
+                {skillsOpen ? (
+                  <div
+                    className="mt-1 max-h-64 space-y-0.5 overflow-y-auto border-t border-[#EDE9E0] pt-1"
+                    data-testid="composer-skill-list"
+                  >
+                    {listSkillMenuItems().map((skill) => (
+                      <button
+                        key={skill.id}
+                        type="button"
+                        className="w-full rounded-lg px-2.5 py-1.5 text-left hover:bg-[#EDE9E0]"
+                        data-testid={`composer-skill-${skill.id}`}
+                        onClick={() => {
+                          setPlusOpen(false);
+                          setSkillsOpen(false);
+                          props.onPickSkill?.(skill);
+                        }}
+                      >
+                        <span className="block text-sm text-[#1F1D19]">{skill.name}</span>
+                        <span className="mt-0.5 block text-[11px] leading-4 text-[#746F67]">
+                          {skill.description}
+                        </span>
+                      </button>
+                    ))}
+                    <p className="px-2.5 py-1.5 text-[10px] leading-4 text-[#9C968C]">
+                      先在作品编辑器里点「让星迹修改」选中区块,技能会生成可确认的修改提案。
+                    </p>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>

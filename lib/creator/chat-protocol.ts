@@ -105,13 +105,44 @@ export type NoticeCard = {
   actions?: CardAction[];
 };
 
+/**
+ * content.propose_patch 提案卡(C7)。
+ * origin 固定为 local_preview:当前提案由本地确定性规则生成,
+ * 是协议预览而非真实 AI 产出;接入 DeepSeek 后 origin 才会扩展。
+ * before/after 是服务端从用户所属版本读取并生成的文本,
+ * 应用时服务端仍会按 revisionId + before 重新校验,不信任卡片内容本身。
+ */
+export type PatchCard = {
+  id: string;
+  version: 1;
+  type: "patch";
+  contentId: string;
+  /** 提案基于的版本;应用时若已不是最新版会被安全拦截 */
+  revisionId: string;
+  revisionNumber: number;
+  contentKind: "xhs_graphic" | "douyin_video_script";
+  section: {
+    kind: "title" | "body" | "hook" | "interaction" | "page" | "shot";
+    index?: number;
+  };
+  sectionLabel: string;
+  skillId: string;
+  instruction: string;
+  before: string;
+  after: string;
+  note?: string;
+  origin: "local_preview";
+  actions: CardAction[];
+};
+
 export type ChatCard =
   | OptionCard
   | ReferenceCard
   | ProgressCard
   | ArtifactCard
   | ApprovalCard
-  | NoticeCard;
+  | NoticeCard
+  | PatchCard;
 
 export type ChatMessageMetadataV1 = {
   protocol: typeof CHAT_PROTOCOL;

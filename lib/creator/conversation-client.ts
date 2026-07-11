@@ -6,7 +6,7 @@
  */
 
 import { readApiJson } from "@/lib/api-client";
-import { parseChatMessageMetadata } from "@/lib/creator/chat-schemas";
+import { parseChatMessageMetadata, type PatchTarget } from "@/lib/creator/chat-schemas";
 import type { ChatCard } from "@/lib/creator/chat-protocol";
 
 export type MessageStatus = "pending" | "complete" | "failed";
@@ -115,6 +115,7 @@ export async function listMessages(conversationId: string): Promise<{
 export async function sendMessage(
   conversationId: string,
   text: string,
+  options?: { patchTarget?: PatchTarget },
 ): Promise<{ userMessage: ThreadMessage; assistantMessage: ThreadMessage; runId: string | null }> {
   const data = await readApiJson<{
     userMessage: RawMessage;
@@ -127,6 +128,7 @@ export async function sendMessage(
       body: JSON.stringify({
         clientMessageId: `cm-${crypto.randomUUID()}`,
         parts: [{ type: "text", text }],
+        ...(options?.patchTarget ? { context: { patchTarget: options.patchTarget } } : {}),
       }),
     }),
   );

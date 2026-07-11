@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { ArtifactCard, ChatCard } from "@/lib/creator/chat-protocol";
+import type { ArtifactCard, ChatCard, PatchCard } from "@/lib/creator/chat-protocol";
 import { actionKeyOf } from "@/lib/creator/conversation-client";
 import { OptionCardView } from "@/components/creator/cards/option-card";
 import { NoticeCardView } from "@/components/creator/cards/notice-card";
@@ -9,6 +9,7 @@ import { ProgressCardView } from "@/components/creator/cards/progress-card";
 import { ApprovalCardView } from "@/components/creator/cards/approval-card";
 import { ReferenceCardView } from "@/components/creator/cards/reference-card";
 import { ArtifactCardView } from "@/components/creator/cards/artifact-card";
+import { PatchCardView } from "@/components/creator/cards/patch-card";
 
 export type CardInvokeState = {
   phase: "idle" | "loading" | "success" | "failed";
@@ -44,6 +45,10 @@ export function CardRenderer(props: {
   onArtifactOpen?: (card: ArtifactCard) => void;
   /** 成果卡「继续优化」的本地处理(预填输入框),不回传服务端 */
   onArtifactRefine?: (card: ArtifactCard) => void;
+  /** 补丁卡「复制到编辑器」的本地处理(写入编辑器草稿),不回传服务端 */
+  onPatchCopyToEditor?: (card: PatchCard) => void;
+  /** 补丁卡「再改一次」的本地处理(带区块上下文预填输入框),不回传服务端 */
+  onPatchRefineAgain?: (card: PatchCard) => void;
   /** 进度卡对应任务进入终态时通知(用于刷新消息流,接收成果卡) */
   onJobSettled?: () => void;
 }) {
@@ -110,6 +115,17 @@ export function CardRenderer(props: {
           onInvoke={(actionId) => void invoke(actionId)}
           onOpen={props.onArtifactOpen}
           onRefine={props.onArtifactRefine}
+        />
+      );
+    case "patch":
+      return (
+        <PatchCardView
+          card={props.card}
+          state={state}
+          processedActionIds={processed}
+          onInvoke={(actionId) => void invoke(actionId)}
+          onCopyToEditor={props.onPatchCopyToEditor}
+          onRefineAgain={props.onPatchRefineAgain}
         />
       );
     case "approval":

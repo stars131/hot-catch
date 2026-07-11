@@ -6,9 +6,20 @@ import { CHAT_PROTOCOL, type ChatCard, type CardAction } from "@/lib/creator/cha
 import {
   chatMessageMetadataV1Schema,
   parseChatMessageMetadata,
+  type PatchTarget,
 } from "@/lib/creator/chat-schemas";
 import { getActionHandler, type ActionResult } from "@/lib/creator/action-registry";
 import { detectUrlsInText, type DetectedUrl } from "@/lib/creator/url-detection";
+import {
+  patchSectionLabel,
+  readRevisionSectionText,
+  resolvePatchScope,
+} from "@/lib/creator/patch-protocol";
+import {
+  executeBuiltinSkill,
+  getSkillManifest,
+  matchSkillByInstruction,
+} from "@/lib/creator/skill-registry";
 import { assertUrlSafe } from "@/lib/security/url-guard";
 import { enqueueJob } from "@/lib/jobs/queues";
 
@@ -162,6 +173,109 @@ export const buildDefaultReply: ReplyBuilder = async ({ conversationId, text }) 
   };
 };
 
+/**
+ * C7 选中区块修改提案:客户端只提交区块引用与摘录,
+ * 服务端从当前用户的内容项目解析最新版本、读取真实区块文本,
+ * 经内置 Skill Registry 生成 content.propose_patch 卡(本地协议预览)。
+ * 不信任客户端提交的正文;应用时 patch.apply 还会再做版本与文本一致性校验。
+ */
+async function buildPatchReply(params: {
+  userId: string;
+  runId: string;
+  text: string;
+  patchTarget: PatchTarget;
+}): Promise<AgentReply> {
+  const { patchTarget } = params;
+  const content = await prisma.generatedContent.findFirst({
+    where: { id: patchTarget.contentId, userId: params.userId },
+    include: { revisions: { orderBy: { revisionNumber: "desc" }, take: 1 } },
+  });
+  if (!content) throw new AppError("NOT_FOUND", "内容项目不存在,或不属于当前账号。", 404);
+  const latest = content.revisions[0];
+  if (!latest) {
+    return { text: "这个内容项目还没有任何版本,先生成或保存一版内容后再发起修改。", cards: [] };
+  }
+  const contentKind = content.contentKind as "xhs_graphic" | "douyin_video_script";
+  const sectionLabel = patchSectionLabel(contentKind, patchTarget.section);
+  const sectionText = readRevisionSectionText(
+    {
+      title: latest.title,
+      bodyText: latest.bodyText,
+      structuredContent: latest.structuredContent,
+    },
+    patchTarget.section,
+  );
+  if (sectionText === null || sectionText.trim() === "") {
+    return {
+      text: `当前版本 v${latest.revisionNumber} 中没有找到「${sectionLabel}」的可修改文本;请先在编辑器里补充该区块内容。`,
+      cards: [],
+    };
+  }
+
+  const skillId =
+    patchTarget.skillId && getSkillManifest(patchTarget.skillId)
+      ? patchTarget.skillId
+      : matchSkillByInstruction(params.text);
+  const before = resolvePatchScope(sectionText, patchTarget.excerpt);
+  const result = executeBuiltinSkill(skillId, {
+    instruction: params.text,
+    sectionLabel,
+    before,
+    contentKind,
+  });
+
+  const proposal = (result.proposedEffects ?? []).find(
+    (effect) => effect.type === "content.propose_revision",
+  );
+  const after =
+    proposal && typeof (proposal.payload as { after?: unknown })?.after === "string"
+      ? ((proposal.payload as { after: string }).after ?? "").slice(0, 4000)
+      : null;
+
+  // 无修改提案的 Skill(如风险检查)只返回说明文本
+  if (after === null) {
+    return {
+      text:
+        result.text ??
+        "该技能没有产生修改提案;可以换一个技能,或补充更具体的指令。",
+      cards: [],
+    };
+  }
+  if (after.trim() === "" || after === before) {
+    return {
+      text: `本地规则没能为「${sectionLabel}」生成有效的修改提案;可以在指令里用「」写出想要的表述,或等真实 AI 改写接入后再试。`,
+      cards: [],
+    };
+  }
+
+  return {
+    text: `已为「${sectionLabel}」生成修改提案(本地规则协议预览,非 AI 改写)。确认后会基于 v${latest.revisionNumber} 创建新版本,不会覆盖历史。`,
+    cards: [
+      {
+        id: `card-patch-${params.runId.slice(-12)}`,
+        version: 1,
+        type: "patch",
+        contentId: content.id,
+        revisionId: latest.id,
+        revisionNumber: latest.revisionNumber,
+        contentKind,
+        section: patchTarget.section,
+        sectionLabel,
+        skillId,
+        instruction: params.text.slice(0, 2000),
+        before,
+        after,
+        note: "本地确定性规则生成的协议预览;接入真实 AI 改写前,用于验证提案-应用链路。",
+        origin: "local_preview",
+        actions: [
+          { actionId: "patch.apply", label: "应用为新版本", appearance: "primary" },
+          { actionId: "patch.dismiss", label: "忽略", appearance: "ghost" },
+        ],
+      },
+    ],
+  };
+}
+
 export async function requireConversation(userId: string, conversationId: string) {
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, userId },
@@ -206,6 +320,7 @@ export async function handleUserMessage(params: {
   conversationId: string;
   text: string;
   clientMessageId: string;
+  patchTarget?: PatchTarget;
   replyBuilder?: ReplyBuilder;
 }) {
   await requireConversation(params.userId, params.conversationId);
@@ -266,7 +381,14 @@ export async function handleUserMessage(params: {
   try {
     const urlScan = detectUrlsInText(params.text);
     const reply =
-      !params.replyBuilder && (urlScan.detected.length || urlScan.invalid.length)
+      !params.replyBuilder && params.patchTarget
+        ? await buildPatchReply({
+            userId: params.userId,
+            runId: created.run.id,
+            text: params.text,
+            patchTarget: params.patchTarget,
+          })
+        : !params.replyBuilder && (urlScan.detected.length || urlScan.invalid.length)
         ? await buildImportReply({
             userId: params.userId,
             runId: created.run.id,

@@ -231,3 +231,74 @@ describe("star-skill/v1 schema", () => {
     ).toBe(false);
   });
 });
+
+describe("patch 卡协议(C7)", () => {
+  const validPatchCard = {
+    id: "card-patch-abc123",
+    version: 1,
+    type: "patch",
+    contentId: "content-1",
+    revisionId: "rev-1",
+    revisionNumber: 3,
+    contentKind: "xhs_graphic",
+    section: { kind: "page", index: 1 },
+    sectionLabel: "第 2 页",
+    skillId: "builtin.rewrite-section",
+    instruction: "把这段改得更具体",
+    before: "修改前的文本",
+    after: "修改后的文本",
+    origin: "local_preview",
+    actions: [
+      { actionId: "patch.apply", label: "应用为新版本", appearance: "primary" },
+      { actionId: "patch.dismiss", label: "忽略", appearance: "ghost" },
+    ],
+  };
+
+  it("合法 patch 卡通过校验", () => {
+    expect(chatCardSchema.safeParse(validPatchCard).success).toBe(true);
+  });
+
+  it("origin 只允许 local_preview,未声明字段被拒绝", () => {
+    expect(
+      chatCardSchema.safeParse({ ...validPatchCard, origin: "deepseek" }).success,
+    ).toBe(false);
+    expect(
+      chatCardSchema.safeParse({ ...validPatchCard, apiUrl: "https://evil.example.com" })
+        .success,
+    ).toBe(false);
+    expect(
+      chatCardSchema.safeParse({
+        ...validPatchCard,
+        section: { kind: "sql", index: 0 },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("patchTarget 上下文只允许区块引用与摘录", () => {
+    const request = {
+      clientMessageId: "cm-1",
+      parts: [{ type: "text", text: "请修改第 2 页" }],
+      context: {
+        patchTarget: {
+          contentId: "content-1",
+          section: { kind: "page", index: 1 },
+          excerpt: "修改前的文本",
+          skillId: "builtin.compress-text",
+        },
+      },
+    };
+    expect(sendMessageRequestSchema.safeParse(request).success).toBe(true);
+    expect(
+      sendMessageRequestSchema.safeParse({
+        ...request,
+        context: {
+          patchTarget: {
+            contentId: "content-1",
+            section: { kind: "page", index: 1 },
+            replacement: "客户端不允许直接提交替换文本",
+          },
+        },
+      }).success,
+    ).toBe(false);
+  });
+});

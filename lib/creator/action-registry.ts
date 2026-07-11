@@ -9,6 +9,9 @@ import {
   urlFingerprint,
   type ReferenceBrief,
 } from "@/lib/creator/reference-brief";
+import { applyRevisionSectionPatch } from "@/lib/creator/patch-protocol";
+import { buildManualRevisionPayload } from "@/lib/content/markdown";
+import { createContentRevision } from "@/lib/services/content-project-service";
 import { assertUrlSafe } from "@/lib/security/url-guard";
 import { createHash } from "node:crypto";
 
@@ -368,6 +371,130 @@ export const ACTION_REGISTRY: Record<string, ActionHandler> = {
       }
       return {
         text: `想继续优化「${context.card.title}」,请直接在对话中描述要修改的方向,例如“把开头改得更具体”或“压缩第 3 页”。`,
+      };
+    },
+  },
+
+  /** 补丁卡:应用提案 → 基于被提案版本创建新 ContentRevision(C7)。 */
+  "patch.apply": {
+    repeatable: false,
+    execute: async (context) => {
+      if (context.card.type !== "patch") {
+        throw new AppError("VALIDATION_ERROR", "该动作只能由修改提案卡触发。", 400);
+      }
+      const card = context.card;
+      const content = await prisma.generatedContent.findFirst({
+        where: { id: card.contentId, userId: context.userId },
+        include: { revisions: { orderBy: { revisionNumber: "desc" }, take: 1 } },
+      });
+      if (!content) {
+        throw new AppError("NOT_FOUND", "内容项目不存在,或不属于当前账号。", 404);
+      }
+      const latest = content.revisions[0];
+      if (!latest) {
+        throw new AppError("VALIDATION_ERROR", "该内容项目没有可应用的版本。", 400);
+      }
+
+      // 安全拦截:提案基于的版本已不是最新版时不应用,提示重新发起;绝不覆盖后来产生的修改
+      if (latest.id !== card.revisionId) {
+        return {
+          text: `没有应用这条提案:它基于 v${card.revisionNumber},而内容已经更新到 v${latest.revisionNumber}。请在最新版本上重新发起「让星迹修改」,历史版本都完整保留。`,
+          cards: [
+            {
+              id: `notice-patch-stale-${context.sourceMessageId.slice(-8)}`,
+              version: 1,
+              type: "notice",
+              tone: "warning",
+              title: "提案已过期,未做任何修改",
+              body: `提案基于 v${card.revisionNumber},当前最新为 v${latest.revisionNumber}。`,
+            },
+          ],
+        };
+      }
+
+      const contentKind = content.contentKind as "xhs_graphic" | "douyin_video_script";
+      const patched = applyRevisionSectionPatch(
+        {
+          title: latest.title,
+          bodyText: latest.bodyText,
+          structuredContent: latest.structuredContent,
+        },
+        card.section,
+        card.before,
+        card.after,
+      );
+      if (!patched) {
+        return {
+          text: `没有应用这条提案:「${card.sectionLabel}」的文本与提案时不一致,可能已被手动编辑。请重新发起修改,不会丢失任何已有内容。`,
+          cards: [
+            {
+              id: `notice-patch-miss-${context.sourceMessageId.slice(-8)}`,
+              version: 1,
+              type: "notice",
+              tone: "warning",
+              title: "区块内容已变化,未做任何修改",
+            },
+          ],
+        };
+      }
+
+      const payload = buildManualRevisionPayload({
+        contentKind,
+        baseStructuredContent: patched.structured,
+        title: patched.title,
+        bodyText: patched.body,
+      });
+      const revision = await createContentRevision(
+        context.userId,
+        content.id,
+        { source: "manual", ...payload },
+        {
+          provenance: {
+            type: "patch_apply",
+            origin: "local_preview",
+            skillId: card.skillId,
+            instruction: card.instruction.slice(0, 500),
+            section: card.section,
+            baseRevisionId: card.revisionId,
+            baseRevisionNumber: card.revisionNumber,
+          } as Prisma.InputJsonValue,
+        },
+      );
+
+      return {
+        text: `已把「${card.sectionLabel}」的修改提案应用为新版本 v${revision.revisionNumber};v${card.revisionNumber} 及之前的版本都在版本历史中,可随时恢复。`,
+        cards: [
+          {
+            id: `card-artifact-patch-${revision.id.slice(-12)}`,
+            version: 1,
+            type: "artifact",
+            contentId: content.id,
+            revisionId: revision.id,
+            revisionNumber: revision.revisionNumber,
+            platform: content.platform as "xiaohongshu" | "douyin",
+            contentKind,
+            title: revision.title ?? content.title ?? "未命名内容",
+            preview: (revision.bodyText ?? "").slice(0, 200) || undefined,
+            actions: [
+              { actionId: "artifact.open", label: "打开编辑", appearance: "primary", repeatable: true },
+              { actionId: "artifact.refine", label: "继续优化", repeatable: true },
+            ],
+          },
+        ],
+        command: "content.apply_patch",
+      };
+    },
+  },
+
+  /** 补丁卡:忽略提案(不做任何修改)。 */
+  "patch.dismiss": {
+    repeatable: false,
+    execute: (context) => {
+      if (context.card.type !== "patch") {
+        throw new AppError("VALIDATION_ERROR", "该动作只能由修改提案卡触发。", 400);
+      }
+      return {
+        text: `已忽略「${context.card.sectionLabel}」的修改提案,内容没有任何变化。`,
       };
     },
   },

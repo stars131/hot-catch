@@ -52,6 +52,7 @@ export async function POST(
       conversationId: id,
       text,
       clientMessageId: input.clientMessageId,
+      patchTarget: input.context?.patchTarget,
     });
     return ok(
       {

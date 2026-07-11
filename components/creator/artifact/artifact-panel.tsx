@@ -7,15 +7,40 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useArtifact, sourceLabel } from "@/hooks/creator/use-artifact";
 import {
   artifactBlockAnchor,
+  artifactSectionLabel,
   buildSectionRefinePrompt,
+  patchSectionOf,
   scoreTargetOf,
   type ArtifactEditorTab,
   type ArtifactSectionRef,
 } from "@/lib/creator/artifact-locator";
+import { applySectionPatch, type PatchSection } from "@/lib/creator/patch-protocol";
 import { ArtifactToolbar } from "@/components/creator/artifact/artifact-toolbar";
 import { ArtifactContentTab } from "@/components/creator/artifact/artifact-content-tab";
 import { ArtifactStructureTab } from "@/components/creator/artifact/artifact-structure-tab";
 import { ScoreEvidencePanel } from "@/components/creator/artifact/score-evidence-panel";
+
+/**
+ * 「让星迹修改」请求:指令预填对话输入框;
+ * target 存在时,发送后会走 content.propose_patch 提案卡路径。
+ */
+export type ArtifactRefineRequest = {
+  instruction: string;
+  sectionLabel: string;
+  target?: {
+    contentId: string;
+    section: PatchSection;
+    excerpt?: string;
+  };
+};
+
+/** 「复制到编辑器」待写入的提案文本;nonce 变化时应用一次。 */
+export type ArtifactPendingInsert = {
+  nonce: number;
+  section: PatchSection;
+  before: string;
+  after: string;
+};
 
 /**
  * Artifact 面板:内容 / 结构 / 评分与证据三个主标签 + 固定顶栏。
@@ -25,11 +50,15 @@ import { ScoreEvidencePanel } from "@/components/creator/artifact/score-evidence
 export function ArtifactPanel(props: {
   contentId: string;
   onClose: () => void;
-  /** 「让星迹修改」把指令预填到对话 Composer;未提供时隐藏该入口 */
-  onAskRefine?: (instruction: string) => void;
+  /** 「让星迹修改」把指令与区块引用交给对话侧;未提供时隐藏该入口 */
+  onAskRefine?: (request: ArtifactRefineRequest) => void;
+  /** 补丁卡「复制到编辑器」待写入的提案 */
+  pendingInsert?: ArtifactPendingInsert | null;
 }) {
   const artifact = useArtifact(props.contentId);
   const [tab, setTab] = useState<ArtifactEditorTab>("content");
+  const [insertNotice, setInsertNotice] = useState<string | null>(null);
+  const appliedInsertNonceRef = useRef(0);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
 
@@ -92,18 +121,50 @@ export function ArtifactPanel(props: {
     (section: ArtifactSectionRef, options?: { detail?: string; excerpt?: string }) => {
       const kind = artifact.content?.contentKind;
       if (!kind || !props.onAskRefine) return;
-      props.onAskRefine(
-        buildSectionRefinePrompt({
+      const patchSection = patchSectionOf(section);
+      const rawExcerpt = (options?.excerpt ?? "").trim();
+      props.onAskRefine({
+        instruction: buildSectionRefinePrompt({
           contentKind: kind,
           section,
           revisionNumber: artifact.viewRevision?.revisionNumber ?? null,
           detail: options?.detail,
           excerpt: options?.excerpt,
         }),
-      );
+        sectionLabel: artifactSectionLabel(kind, section, options?.detail),
+        // cover/tags/risk 暂不支持补丁提案,退回普通对话预填
+        target: patchSection
+          ? {
+              contentId: props.contentId,
+              section: patchSection,
+              excerpt: rawExcerpt ? rawExcerpt.slice(0, 500) : undefined,
+            }
+          : undefined,
+      });
     },
     [artifact.content?.contentKind, artifact.viewRevision?.revisionNumber, props],
   );
+
+  // 补丁卡「复制到编辑器」:把提案写入当前草稿(等同手动编辑,走自动保存);
+  // 区块文本已变化或处于只读预览时不写入,给出明确提示,不静默覆盖。
+  useEffect(() => {
+    const insert = props.pendingInsert;
+    if (!insert || insert.nonce === appliedInsertNonceRef.current) return;
+    if (artifact.loadState !== "ready") return;
+    appliedInsertNonceRef.current = insert.nonce;
+    if (artifact.previewing) {
+      setInsertNotice("正在查看历史版本(只读),请先回到最新版再复制提案。");
+      return;
+    }
+    const patched = applySectionPatch(artifact.draft, insert.section, insert.before, insert.after);
+    if (!patched) {
+      setInsertNotice("提案对应的文本在编辑器中已变化,没有写入;可重新发起「让星迹修改」。");
+      return;
+    }
+    artifact.editDraft(patched);
+    setInsertNotice("已把提案文本复制到编辑器,会作为手动修改自动保存。");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.pendingInsert, artifact.loadState, artifact.previewing]);
 
   const handleExport = useCallback(async () => {
     const exported = await artifact.exportMarkdown();
@@ -250,6 +311,23 @@ export function ArtifactPanel(props: {
                 type="button"
                 className="shrink-0 text-[#9C968C] hover:text-[#67625A]"
                 onClick={artifact.dismissNotice}
+              >
+                知道了
+              </button>
+            </div>
+          ) : null}
+
+          {insertNotice ? (
+            <div
+              className="mx-3.5 mt-3 flex items-start gap-2 rounded-xl border border-[#DDD7CE] bg-[#FAF9F6] px-3 py-2 text-xs leading-5 text-[#67625A]"
+              data-testid="artifact-insert-notice"
+              role="status"
+            >
+              <span className="min-w-0 flex-1">{insertNotice}</span>
+              <button
+                type="button"
+                className="shrink-0 text-[#9C968C] hover:text-[#67625A]"
+                onClick={() => setInsertNotice(null)}
               >
                 知道了
               </button>

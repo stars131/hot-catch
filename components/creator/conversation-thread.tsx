@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { ArtifactCard } from "@/lib/creator/chat-protocol";
+import type { ArtifactCard, PatchCard } from "@/lib/creator/chat-protocol";
 import type { ActiveRun, ThreadMessage } from "@/lib/creator/conversation-client";
 import {
   CardRenderer,
@@ -52,6 +52,8 @@ export function ConversationThread(props: {
   onCancelRun: (runId: string) => void;
   onArtifactOpen?: (card: ArtifactCard) => void;
   onArtifactRefine?: (card: ArtifactCard) => void;
+  onPatchCopyToEditor?: (card: PatchCard) => void;
+  onPatchRefineAgain?: (card: PatchCard) => void;
   onJobSettled?: () => void;
 }) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -173,6 +175,8 @@ export function ConversationThread(props: {
                     onInvoke={props.onInvokeAction}
                     onArtifactOpen={props.onArtifactOpen}
                     onArtifactRefine={props.onArtifactRefine}
+                    onPatchCopyToEditor={props.onPatchCopyToEditor}
+                    onPatchRefineAgain={props.onPatchRefineAgain}
                     onJobSettled={props.onJobSettled}
                   />
                 ))}

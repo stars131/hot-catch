@@ -146,6 +146,38 @@ export const noticeCardSchema = z
   })
   .strict();
 
+export const patchCardSchema = z
+  .object({
+    ...cardBase,
+    type: z.literal("patch"),
+    contentId: z.string().min(1).max(64),
+    revisionId: z.string().min(1).max(64),
+    revisionNumber: z.number().int().positive(),
+    contentKind: z.enum(["xhs_graphic", "douyin_video_script"]),
+    section: z
+      .object({
+        kind: z.enum([
+          "title",
+          "body",
+          "hook",
+          "interaction",
+          "page",
+          "shot",
+        ]),
+        index: z.number().int().min(0).max(999).optional(),
+      })
+      .strict(),
+    sectionLabel: z.string().min(1).max(120),
+    skillId: z.string().regex(/^[a-z][a-z0-9._-]{1,63}$/),
+    instruction: z.string().min(1).max(2000),
+    before: z.string().max(4000),
+    after: z.string().max(4000),
+    note: z.string().max(500).optional(),
+    origin: z.literal("local_preview"),
+    actions: z.array(cardActionSchema).min(1).max(8),
+  })
+  .strict();
+
 export const chatCardSchema = z.discriminatedUnion("type", [
   optionCardSchema,
   referenceCardSchema,
@@ -153,6 +185,7 @@ export const chatCardSchema = z.discriminatedUnion("type", [
   artifactCardSchema,
   approvalCardSchema,
   noticeCardSchema,
+  patchCardSchema,
 ]) satisfies z.ZodType<ChatCard>;
 
 export const chatMessageMetadataV1Schema = z
@@ -175,6 +208,30 @@ export function parseChatMessageMetadata(value: unknown): ChatMessageMetadataV1 
   return result.success ? result.data : null;
 }
 
+/**
+ * 选中区块修改目标(C7):客户端只提交区块引用与摘录;
+ * 服务端自行解析最新版本并从用户所属内容读取真实文本,
+ * 不信任客户端提交的任何正文或版本号。
+ */
+export const patchTargetSchema = z
+  .object({
+    contentId: z.string().min(1).max(64),
+    section: z
+      .object({
+        kind: z.enum(["title", "body", "hook", "interaction", "page", "shot"]),
+        index: z.number().int().min(0).max(999).optional(),
+      })
+      .strict(),
+    excerpt: z.string().max(500).optional(),
+    skillId: z
+      .string()
+      .regex(/^[a-z][a-z0-9._-]{1,63}$/)
+      .optional(),
+  })
+  .strict();
+
+export type PatchTarget = z.infer<typeof patchTargetSchema>;
+
 /** 发送消息请求(C3 API 将使用;此处先固定协议形状)。 */
 export const sendMessageRequestSchema = z
   .object({
@@ -195,6 +252,7 @@ export const sendMessageRequestSchema = z
         contentId: z.string().min(1).max(64).optional(),
         personaId: z.string().min(1).max(64).optional(),
         styleProfileId: z.string().min(1).max(64).optional(),
+        patchTarget: patchTargetSchema.optional(),
       })
       .strict()
       .optional(),

@@ -111,14 +111,17 @@ test.describe("C2 创作壳层(桌面 1440×900)", () => {
     });
   });
 
-  test("+ 菜单未实现能力明确标注即将支持", async ({ page }) => {
+  test("+ 菜单未实现能力明确标注即将支持;技能已启用(C7)", async ({ page }) => {
     await page.goto(XHS);
-    await page.getByRole("button", { name: "添加资料" }).click();
+    await page.getByRole("button", { name: "添加资料或技能" }).click();
     await expect(page.getByText("上传素材")).toBeVisible();
     await expect(page.getByText("导入链接")).toBeVisible();
     await expect(page.getByText("技能")).toBeVisible();
-    await expect(page.getByText("即将支持")).toHaveCount(3);
+    // C7 起「技能」由内置 Skill Registry 驱动,不再是占位;其余两项仍如实标注
+    await expect(page.getByText("即将支持")).toHaveCount(2);
     await expect(page.getByRole("button", { name: /上传素材/ })).toBeDisabled();
+    await page.getByTestId("composer-skills-toggle").click();
+    await expect(page.getByTestId("composer-skill-list")).toBeVisible();
   });
 });
 
