@@ -66,7 +66,8 @@ export type ManualRevisionPayload = {
 /**
  * 把手动编辑的标题/正文合并进既有 structuredContent,并重建 fullMarkdown。
  * - 小红书:正文写入 bodyText;抖音:正文写入 caption。
- * - 结构字段(分页/分镜)原样保留,C6 编辑器上线前不在面板里改结构。
+ * - 结构字段(分页/分镜)以草稿中的编辑结果为准;
+ *   标签/风险等字符串列表在落库前清掉空行(编辑器允许暂存空行)。
  * - 没有结构化数据时退化为「标题 + 正文 + 标签」的简单 Markdown。
  */
 export function buildManualRevisionPayload(params: {
@@ -82,7 +83,7 @@ export function buildManualRevisionPayload(params: {
 
   let structuredContent: Record<string, unknown> | undefined;
   if (hasStructure) {
-    structuredContent = { ...base, title: title || base.title };
+    structuredContent = dropEmptyListEntries({ ...base, title: title || base.title });
     if (params.contentKind === "xhs_graphic") structuredContent.bodyText = body;
     else structuredContent.caption = body;
   }
@@ -93,6 +94,22 @@ export function buildManualRevisionPayload(params: {
     structuredContent,
     fullMarkdown: buildMarkdown(params.contentKind, title, body, structuredContent),
   };
+}
+
+/** 编辑器中的字符串列表允许暂存空行;保存时过滤,避免落库垃圾数据。 */
+const STRING_LIST_KEYS = ["tags", "riskNotes", "coverTextOptions", "titleOptions"] as const;
+
+function dropEmptyListEntries(
+  structured: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = { ...structured };
+  for (const key of STRING_LIST_KEYS) {
+    if (!Array.isArray(next[key])) continue;
+    next[key] = (next[key] as unknown[]).filter(
+      (item) => typeof item !== "string" || item.trim().length > 0,
+    );
+  }
+  return next;
 }
 
 function buildMarkdown(

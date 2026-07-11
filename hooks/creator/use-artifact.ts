@@ -10,6 +10,13 @@
  *   有未保存人工修改 → 进入冲突状态,由用户显式选择,绝不静默覆盖;
  *   无修改且正在看最新版 → 跟随到新版本并提示。
  * - 切换/恢复/导出/评分前先冲刷未保存草稿,任何路径都不丢人工修改。
+ *
+ * C6 增量:
+ * - 草稿扩展为 { title, body, structured }:分页/分镜/标签等结构字段
+ *   与标题正文共用同一套编辑历史、自动保存与冲突机制;
+ *   结构编辑必须以 immutable 方式产生新对象。
+ * - 查看非最新版本 = 只读预览(previewing):不允许编辑,
+ *   恢复或回到最新版后才能继续修改;预览期间外部新版本只提示,不弹冲突。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -66,7 +73,12 @@ export type ArtifactContentData = {
   references: ArtifactReference[];
 };
 
-export type ArtifactDraft = { title: string; body: string };
+export type ArtifactDraft = {
+  title: string;
+  body: string;
+  /** 当前草稿的结构化内容(分页/分镜/标签等);无结构化数据的旧版本为 null */
+  structured: Record<string, unknown> | null;
+};
 
 export type ArtifactConflict = { incoming: ArtifactRevision };
 
@@ -76,6 +88,14 @@ const POLL_INTERVAL_MS = 5000;
 const AUTOSAVE_DELAY_MS = 2500;
 const HISTORY_GROUP_MS = 800;
 const HISTORY_LIMIT = 50;
+
+const EMPTY_DRAFT: ArtifactDraft = { title: "", body: "", structured: null };
+
+function structuredOf(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
 
 function parseScore(value: unknown): ArtifactScore | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -162,8 +182,9 @@ export function useArtifact(contentId: string) {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [viewRevisionId, setViewRevisionId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<ArtifactDraft>({ title: "", body: "" });
+  const [draft, setDraft] = useState<ArtifactDraft>(EMPTY_DRAFT);
   const [dirty, setDirty] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<ArtifactConflict | null>(null);
@@ -174,29 +195,36 @@ export function useArtifact(contentId: string) {
   const contentRef = useRef<ArtifactContentData | null>(null);
   const draftRef = useRef(draft);
   const dirtyRef = useRef(dirty);
+  const previewingRef = useRef(previewing);
   const conflictRef = useRef(conflict);
   const viewRevisionIdRef = useRef<string | null>(null);
   const knownLatestIdRef = useRef<string | null>(null);
   const ownRevisionIdsRef = useRef<Set<string>>(new Set());
   const savePromiseRef = useRef<Promise<ArtifactRevision | null> | null>(null);
   const historyRef = useRef<{ stack: ArtifactDraft[]; index: number; lastPushAt: number }>({
-    stack: [{ title: "", body: "" }],
+    stack: [EMPTY_DRAFT],
     index: 0,
     lastPushAt: 0,
   });
 
   draftRef.current = draft;
   dirtyRef.current = dirty;
+  previewingRef.current = previewing;
   conflictRef.current = conflict;
   contentRef.current = content;
   viewRevisionIdRef.current = viewRevisionId;
 
   const seedDraft = useCallback((revision: ArtifactRevision | null) => {
-    const next = revision
-      ? { title: revision.title ?? "", body: revision.bodyText ?? "" }
-      : { title: "", body: "" };
+    const next: ArtifactDraft = revision
+      ? {
+          title: revision.title ?? "",
+          body: revision.bodyText ?? "",
+          structured: structuredOf(revision.structuredContent),
+        }
+      : EMPTY_DRAFT;
     setDraft(next);
     setDirty(false);
+    setPreviewing(false);
     setViewRevisionId(revision?.id ?? null);
     historyRef.current = { stack: [next], index: 0, lastPushAt: 0 };
     setHistoryVersion((version) => version + 1);
@@ -260,12 +288,15 @@ export function useArtifact(contentId: string) {
             )?.source;
             if (
               dirtyRef.current ||
-              (viewingPreviousLatest && viewingSource !== "generated")
+              (viewingPreviousLatest &&
+                viewingSource !== "generated" &&
+                !previewingRef.current)
             ) {
               // 有未保存修改,或正在编辑自己的 manual/restored 版本:
-              // 进入冲突,由用户显式选择,绝不静默覆盖/切换
+              // 进入冲突,由用户显式选择,绝不静默覆盖/切换。
+              // 只读预览中没有可丢失的编辑,不弹冲突,走下方提示分支。
               setConflict({ incoming: nextLatest });
-            } else if (viewingPreviousLatest) {
+            } else if (viewingPreviousLatest && !previewingRef.current) {
               seedDraft(nextLatest);
               setUpdateNotice(
                 `内容已更新到 v${nextLatest.revisionNumber}(${sourceLabel(nextLatest.source)})。`,
@@ -297,16 +328,15 @@ export function useArtifact(contentId: string) {
     if (savePromiseRef.current) return savePromiseRef.current;
 
     const snapshot = { ...draftRef.current };
-    const baseStructured =
-      contentData.revisions.find((revision) => revision.id === viewRevisionIdRef.current)
-        ?.structuredContent ?? null;
     setSaveState("saving");
 
     const promise = (async () => {
       try {
+        // 草稿的 structured 就是编辑后的结构化内容;
+        // 标题/正文由 payload 构建器合并进去并重建 fullMarkdown
         const payload = buildManualRevisionPayload({
           contentKind: contentData.contentKind,
-          baseStructuredContent: baseStructured,
+          baseStructuredContent: snapshot.structured,
           title: snapshot.title,
           bodyText: snapshot.body,
         });
@@ -326,7 +356,9 @@ export function useArtifact(contentId: string) {
         setViewRevisionId(revision.id);
         // 保存期间若又有输入,保持 dirty 让自动保存继续
         const unchanged =
-          draftRef.current.title === snapshot.title && draftRef.current.body === snapshot.body;
+          draftRef.current.title === snapshot.title &&
+          draftRef.current.body === snapshot.body &&
+          draftRef.current.structured === snapshot.structured;
         if (unchanged) setDirty(false);
         setSaveState("saved");
         setSaveError(null);
@@ -359,6 +391,8 @@ export function useArtifact(contentId: string) {
   }, [draft, dirty, conflict, loadState, saveState, performSave]);
 
   const editDraft = useCallback((patch: Partial<ArtifactDraft>) => {
+    // 只读预览中不接受编辑;恢复或回到最新版后才能修改
+    if (previewingRef.current) return;
     setUpdateNotice(null);
     setDraft((previous) => {
       const next = { ...previous, ...patch };
@@ -399,7 +433,10 @@ export function useArtifact(contentId: string) {
     setHistoryVersion((version) => version + 1);
   }, []);
 
-  /** 查看某个版本:先冲刷未保存修改,再载入目标版本;不置 dirty。 */
+  /**
+   * 查看某个版本:先冲刷未保存修改,再载入目标版本;不置 dirty。
+   * 非最新版本进入只读预览,编辑须恢复该版本或回到最新版。
+   */
   const viewRevisionById = useCallback(
     async (revisionId: string): Promise<boolean> => {
       if (revisionId === viewRevisionIdRef.current) return true;
@@ -409,11 +446,19 @@ export function useArtifact(contentId: string) {
       );
       if (!target) return false;
       seedDraft(target);
+      setPreviewing(target.id !== contentRef.current?.revisions[0]?.id);
       setUpdateNotice(null);
       return true;
     },
     [flushDraft, seedDraft],
   );
+
+  /** 从只读预览回到最新版本继续编辑。 */
+  const viewLatest = useCallback(async (): Promise<boolean> => {
+    const latest = contentRef.current?.revisions[0];
+    if (!latest) return false;
+    return viewRevisionById(latest.id);
+  }, [viewRevisionById]);
 
   /** 恢复版本:服务端按被选中版本 payload 创建新版本;客户端不上传正文。 */
   const restoreRevision = useCallback(
@@ -532,6 +577,7 @@ export function useArtifact(contentId: string) {
     loadError,
     draft,
     dirty,
+    previewing,
     saveState,
     saveError,
     conflict,
@@ -547,6 +593,7 @@ export function useArtifact(contentId: string) {
     saveNow: performSave,
     flushDraft,
     viewRevisionById,
+    viewLatest,
     restoreRevision,
     rescore,
     exportMarkdown,

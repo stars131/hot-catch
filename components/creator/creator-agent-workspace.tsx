@@ -353,6 +353,18 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
     focusComposer();
   }
 
+  /**
+   * Artifact 编辑器内「让星迹修改」:把区块修改指令预填到 Composer。
+   * <1180px 时 Artifact 全屏覆盖对话,先收起面板让用户看到输入框;
+   * 桌面保持面板打开,便于边看内容边补全指令。
+   */
+  function handleArtifactAskRefine(instruction: string) {
+    setComposerValue(instruction);
+    const desktop = window.matchMedia("(min-width: 1180px)").matches;
+    if (!desktop) setArtifactContentId(null);
+    window.setTimeout(focusComposer, desktop ? 0 : 80);
+  }
+
   const handleJobSettled = useCallback(() => {
     if (conversationId) void reloadMessages(conversationId);
   }, [conversationId, reloadMessages]);
@@ -436,6 +448,7 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
           <ArtifactPanel
             contentId={artifactContentId}
             onClose={() => setArtifactContentId(null)}
+            onAskRefine={handleArtifactAskRefine}
           />
         ) : undefined
       }

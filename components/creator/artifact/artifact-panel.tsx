@@ -1,14 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle, Eye, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useArtifact, sourceLabel } from "@/hooks/creator/use-artifact";
 import {
   artifactBlockAnchor,
+  buildSectionRefinePrompt,
   scoreTargetOf,
   type ArtifactEditorTab,
+  type ArtifactSectionRef,
 } from "@/lib/creator/artifact-locator";
 import { ArtifactToolbar } from "@/components/creator/artifact/artifact-toolbar";
 import { ArtifactContentTab } from "@/components/creator/artifact/artifact-content-tab";
@@ -18,8 +20,14 @@ import { ScoreEvidencePanel } from "@/components/creator/artifact/score-evidence
 /**
  * Artifact 面板:内容 / 结构 / 评分与证据三个主标签 + 固定顶栏。
  * 桌面(≥1180px)作为右侧栏,窄屏与手机全屏覆盖;由外层容器决定,面板单实例。
+ * 「内容」是结构化编辑器,「结构」是只读大纲;查看历史版本进入只读预览。
  */
-export function ArtifactPanel(props: { contentId: string; onClose: () => void }) {
+export function ArtifactPanel(props: {
+  contentId: string;
+  onClose: () => void;
+  /** 「让星迹修改」把指令预填到对话 Composer;未提供时隐藏该入口 */
+  onAskRefine?: (instruction: string) => void;
+}) {
   const artifact = useArtifact(props.contentId);
   const [tab, setTab] = useState<ArtifactEditorTab>("content");
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -49,25 +57,53 @@ export function ArtifactPanel(props: { contentId: string; onClose: () => void })
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [props]);
 
-  const locate = useCallback((dimensionKey: string) => {
-    const kind = artifact.content?.contentKind;
-    if (!kind) return;
-    const target = scoreTargetOf(kind, dimensionKey);
-    if (!target) return;
-    setTab(target.tab);
-    window.setTimeout(() => {
-      const element = rootRef.current?.querySelector<HTMLElement>(
-        `[data-artifact-block="${artifactBlockAnchor(target.blockId)}"]`,
+  /** 切换标签并滚动高亮目标块;供评分警告定位与结构大纲跳转共用。 */
+  const jumpToAnchor = useCallback(
+    (targetTab: Exclude<ArtifactEditorTab, "score">, anchor: string) => {
+      setTab(targetTab);
+      window.setTimeout(() => {
+        const element = rootRef.current?.querySelector<HTMLElement>(
+          `[data-artifact-block="${anchor}"]`,
+        );
+        if (!element) return;
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
+        element.classList.remove("artifact-flash");
+        // 触发重绘,保证连续点击同一警告也会重新高亮
+        void element.offsetWidth;
+        element.classList.add("artifact-flash");
+        window.setTimeout(() => element.classList.remove("artifact-flash"), 1700);
+      }, 80);
+    },
+    [],
+  );
+
+  const locate = useCallback(
+    (dimensionKey: string) => {
+      const kind = artifact.content?.contentKind;
+      if (!kind) return;
+      const target = scoreTargetOf(kind, dimensionKey);
+      if (!target) return;
+      jumpToAnchor(target.tab, artifactBlockAnchor(target.blockId));
+    },
+    [artifact.content?.contentKind, jumpToAnchor],
+  );
+
+  const handleAskRefine = useCallback(
+    (section: ArtifactSectionRef, options?: { detail?: string; excerpt?: string }) => {
+      const kind = artifact.content?.contentKind;
+      if (!kind || !props.onAskRefine) return;
+      props.onAskRefine(
+        buildSectionRefinePrompt({
+          contentKind: kind,
+          section,
+          revisionNumber: artifact.viewRevision?.revisionNumber ?? null,
+          detail: options?.detail,
+          excerpt: options?.excerpt,
+        }),
       );
-      if (!element) return;
-      element.scrollIntoView({ behavior: "smooth", block: "center" });
-      element.classList.remove("artifact-flash");
-      // 触发重绘,保证连续点击同一警告也会重新高亮
-      void element.offsetWidth;
-      element.classList.add("artifact-flash");
-      window.setTimeout(() => element.classList.remove("artifact-flash"), 1700);
-    }, 80);
-  }, [artifact.content?.contentKind]);
+    },
+    [artifact.content?.contentKind, artifact.viewRevision?.revisionNumber, props],
+  );
 
   const handleExport = useCallback(async () => {
     const exported = await artifact.exportMarkdown();
@@ -128,6 +164,43 @@ export function ArtifactPanel(props: { contentId: string; onClose: () => void })
             onShowScore={() => setTab("score")}
             onClose={props.onClose}
           />
+
+          {artifact.previewing && artifact.viewRevision ? (
+            <div
+              className="mx-3.5 mt-3 rounded-xl border border-[#DDD7CE] bg-[#F5F4F1] p-3"
+              data-testid="artifact-preview-banner"
+              role="status"
+            >
+              <p className="flex items-center gap-1.5 text-sm font-medium text-[#67625A]">
+                <Eye className="h-4 w-4 shrink-0" aria-hidden />
+                正在查看历史版本 v{artifact.viewRevision.revisionNumber}(
+                {sourceLabel(artifact.viewRevision.source)}),内容只读。
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="rounded-lg border-[#DDD7CE]"
+                  disabled={artifact.busyAction !== null}
+                  onClick={() =>
+                    void artifact.restoreRevision(artifact.viewRevision!.id)
+                  }
+                  data-testid="artifact-preview-restore"
+                >
+                  恢复此版本
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="rounded-lg text-[#67625A]"
+                  onClick={() => void artifact.viewLatest()}
+                  data-testid="artifact-preview-back-latest"
+                >
+                  回到最新版
+                </Button>
+              </div>
+            </div>
+          ) : null}
 
           {artifact.conflict ? (
             <div
@@ -210,14 +283,20 @@ export function ArtifactPanel(props: { contentId: string; onClose: () => void })
                 <ArtifactContentTab
                   content={artifact.content}
                   draft={artifact.draft}
-                  structuredContent={artifact.viewRevision?.structuredContent ?? null}
+                  readOnly={artifact.previewing}
                   onEdit={artifact.editDraft}
+                  onAskRefine={handleAskRefine}
                 />
               </TabsContent>
               <TabsContent value="structure" className="mt-0">
                 <ArtifactStructureTab
                   contentKind={artifact.content.contentKind}
-                  structuredContent={artifact.viewRevision?.structuredContent ?? null}
+                  structuredContent={
+                    artifact.draft.structured ??
+                    artifact.viewRevision?.structuredContent ??
+                    null
+                  }
+                  onJumpTo={(anchor) => jumpToAnchor("content", anchor)}
                 />
               </TabsContent>
               <TabsContent value="score" className="mt-0">

@@ -266,13 +266,15 @@ test.describe("C5 Artifact 面板(桌面 1440×900)", () => {
       timeout: 20000,
     });
 
-    // 6. 查看 v1:载入旧版本但不产生新版本(修复「切换版本触发保存」缺陷)
+    // 6. 查看 v1:只读预览,不产生新版本(C6 起查看历史版本不可编辑)
     await panel.getByTestId("artifact-revision-menu-trigger").click();
     await panel
       .getByTestId("artifact-revision-item-1")
       .getByRole("button", { name: "查看" })
       .click();
     await expect(titleInput).toHaveValue(SEED_TITLE);
+    await expect(panel.getByTestId("artifact-preview-banner")).toBeVisible();
+    await expect(titleInput).toBeDisabled();
     await expect(panel.getByTestId("artifact-save-state")).toHaveText(/已保存 v1/);
     await page.waitForTimeout(3500); // 超过自动保存窗口,确认没有偷偷建版
     await panel.getByTestId("artifact-revision-menu-trigger").click();
@@ -280,7 +282,7 @@ test.describe("C5 Artifact 面板(桌面 1440×900)", () => {
       panel.locator('[data-testid^="artifact-revision-item-"]'),
     ).toHaveCount(2);
 
-    // 7. 恢复 v1 → 服务端按 v1 payload 创建 v3(restored)
+    // 7. 恢复 v1 → 服务端按 v1 payload 创建 v3(restored);恢复后退出只读预览
     await panel
       .getByTestId("artifact-revision-item-1")
       .getByRole("button", { name: "恢复" })
@@ -288,7 +290,9 @@ test.describe("C5 Artifact 面板(桌面 1440×900)", () => {
     await expect(panel.getByTestId("artifact-save-state")).toHaveText(/已保存 v3/, {
       timeout: 15000,
     });
+    await expect(panel.getByTestId("artifact-preview-banner")).toBeHidden();
     await expect(titleInput).toHaveValue(SEED_TITLE);
+    await expect(titleInput).toBeEnabled();
     await panel.getByTestId("artifact-revision-menu-trigger").click();
     const revisionItems = panel.locator('[data-testid^="artifact-revision-item-"]');
     await expect(revisionItems).toHaveCount(3);

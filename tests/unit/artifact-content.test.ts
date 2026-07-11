@@ -4,7 +4,12 @@ import {
   toDouyinMarkdown,
   toXhsMarkdown,
 } from "@/lib/content/markdown";
-import { scoreTargetOf } from "@/lib/creator/artifact-locator";
+import {
+  artifactItemAnchor,
+  artifactSectionLabel,
+  buildSectionRefinePrompt,
+  scoreTargetOf,
+} from "@/lib/creator/artifact-locator";
 
 describe("markdown builders", () => {
   it("renders xhs pages, body and tags", () => {
@@ -70,12 +75,56 @@ describe("buildManualRevisionPayload", () => {
     expect(payload.bodyText).toBe("新正文");
     expect(structured.title).toBe("新标题");
     expect(structured.bodyText).toBe("新正文");
-    // 结构字段原样保留(C6 编辑器前不在面板中修改)
+    // 未被编辑的结构字段原样保留
     expect(structured.pages).toEqual(xhsStructured.pages);
     expect(structured.interactionEnding).toBe("评论区聊聊");
     expect(payload.fullMarkdown).toContain("# 新标题");
     expect(payload.fullMarkdown).toContain("## 第 1 页：第一页");
     expect(payload.fullMarkdown).toContain("新正文");
+  });
+
+  it("rebuilds markdown from structurally edited pages (C6 editor)", () => {
+    const edited = {
+      ...xhsStructured,
+      pages: [
+        { pageNumber: 1, heading: "重写的第一页", body: "新的页面内容", visualSuggestion: "大字" },
+        { pageNumber: 2, heading: "新增的第二页", body: "补充内容", visualSuggestion: "" },
+      ],
+      tags: ["职场", "复盘"],
+    };
+    const payload = buildManualRevisionPayload({
+      contentKind: "xhs_graphic",
+      baseStructuredContent: edited,
+      title: "新标题",
+      bodyText: "正文",
+    });
+    expect(payload.fullMarkdown).toContain("## 第 1 页：重写的第一页");
+    expect(payload.fullMarkdown).toContain("## 第 2 页：新增的第二页");
+    expect(payload.fullMarkdown).toContain("#职场 #复盘");
+    expect((payload.structuredContent as Record<string, unknown>).pages).toEqual(
+      edited.pages,
+    );
+  });
+
+  it("drops empty rows from string lists but keeps working pages", () => {
+    const payload = buildManualRevisionPayload({
+      contentKind: "xhs_graphic",
+      baseStructuredContent: {
+        ...xhsStructured,
+        tags: ["职场", "", "  "],
+        riskNotes: ["避免绝对化", ""],
+        coverTextOptions: ["封面", ""],
+        pages: [{ pageNumber: 1, heading: "", body: "", visualSuggestion: "" }],
+      },
+      title: "标题标题",
+      bodyText: "正文",
+    });
+    const structured = payload.structuredContent as Record<string, unknown>;
+    expect(structured.tags).toEqual(["职场"]);
+    expect(structured.riskNotes).toEqual(["避免绝对化"]);
+    expect(structured.coverTextOptions).toEqual(["封面"]);
+    // 编辑中的空白页保留,由用户显式删除
+    expect(structured.pages).toHaveLength(1);
   });
 
   it("writes douyin body edits into caption and keeps shots", () => {
@@ -140,6 +189,11 @@ describe("scoreTargetOf", () => {
       expect(target, `xhs dimension ${key}`).not.toBeNull();
       expect(["content", "structure"]).toContain(target!.tab);
     }
+    // C6:结构与视觉警告直接定位到「内容」标签中可编辑的分页块
+    expect(scoreTargetOf("xhs_graphic", "structure")).toMatchObject({
+      tab: "content",
+      blockId: "pages",
+    });
   });
 
   it("maps every douyin scoring dimension to a locatable block", () => {
@@ -148,10 +202,71 @@ describe("scoreTargetOf", () => {
       expect(target, `douyin dimension ${key}`).not.toBeNull();
       expect(["content", "structure"]).toContain(target!.tab);
     }
+    expect(scoreTargetOf("douyin_video_script", "timeline")).toMatchObject({
+      tab: "content",
+      blockId: "shots",
+    });
   });
 
   it("returns null for unknown dimensions instead of guessing", () => {
     expect(scoreTargetOf("xhs_graphic", "unknown")).toBeNull();
     expect(scoreTargetOf("xhs_graphic", "__proto__")).toBeNull();
+  });
+});
+
+describe("artifact section refine protocol", () => {
+  it("labels repeated blocks with 1-based position and optional detail", () => {
+    expect(artifactSectionLabel("xhs_graphic", { kind: "page", index: 1 }, "方法")).toBe(
+      "第 2 页「方法」",
+    );
+    expect(
+      artifactSectionLabel("douyin_video_script", { kind: "shot", index: 0 }, "0s–3s"),
+    ).toBe("第 1 镜(0s–3s)");
+    expect(artifactSectionLabel("xhs_graphic", { kind: "body" })).toBe("完整正文");
+    expect(artifactSectionLabel("douyin_video_script", { kind: "body" })).toBe("发布文案");
+  });
+
+  it("builds a stable composer prefix with revision number", () => {
+    expect(
+      buildSectionRefinePrompt({
+        contentKind: "xhs_graphic",
+        section: { kind: "page", index: 2 },
+        revisionNumber: 4,
+        detail: "结尾",
+      }),
+    ).toBe("请修改第 3 页「结尾」(当前 v4):");
+  });
+
+  it("keeps a normalized excerpt when text was selected", () => {
+    const prompt = buildSectionRefinePrompt({
+      contentKind: "xhs_graphic",
+      section: { kind: "body" },
+      revisionNumber: 2,
+      excerpt: "  这句话\n太生硬了  ",
+    });
+    expect(prompt).toBe("请修改完整正文(当前 v2)中选中的这段:「这句话 太生硬了」,");
+  });
+
+  it("truncates long excerpts and omits empty ones", () => {
+    const long = "长".repeat(120);
+    const prompt = buildSectionRefinePrompt({
+      contentKind: "douyin_video_script",
+      section: { kind: "shot", index: 4 },
+      excerpt: long,
+    });
+    expect(prompt).toContain("…");
+    expect(prompt.length).toBeLessThan(120);
+    expect(
+      buildSectionRefinePrompt({
+        contentKind: "douyin_video_script",
+        section: { kind: "hook" },
+        excerpt: "   ",
+      }),
+    ).toBe("请修改开场钩子:");
+  });
+
+  it("exposes stable per-item anchors for outline jumps", () => {
+    expect(artifactItemAnchor("pages", 0)).toBe("artifact-block-pages-1");
+    expect(artifactItemAnchor("shots", 2)).toBe("artifact-block-shots-3");
   });
 });
