@@ -18,6 +18,84 @@ services:
       timeout: 5s
       retries: 12
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  web:
+    build:
+      context: .
+      target: development
+    restart: unless-stopped
+    command: ["sh", "-c", "npx prisma db push && npm run db:backfill && npm run dev -- --hostname 0.0.0.0"]
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://${POSTGRES_USER:-xhs}:${POSTGRES_PASSWORD:-xhs_password}@db:5432/${POSTGRES_DB:-xhs_benchmark}?schema=public
+      REDIS_URL: redis://redis:6379
+      NEXT_PUBLIC_APP_URL: http://localhost:${APP_PORT:-3000}
+      AUTH_URL: http://localhost:${APP_PORT:-3000}
+      AUTH_SECRET: ${AUTH_SECRET:-startrace-local-compose-secret}
+      DEV_AUTH_BYPASS: ${DEV_AUTH_BYPASS:-1}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      XHS_FETCH_PROVIDER: ${XHS_FETCH_PROVIDER:-mock}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    volumes:
+      - .:/app
+      - web_node_modules:/app/node_modules
+      - next_cache:/app/.next
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)})\""]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+
+  worker:
+    build:
+      context: .
+      target: development
+    restart: unless-stopped
+    command: ["npm", "run", "worker"]
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://${POSTGRES_USER:-xhs}:${POSTGRES_PASSWORD:-xhs_password}@db:5432/${POSTGRES_DB:-xhs_benchmark}?schema=public
+      REDIS_URL: redis://redis:6379
+      AUTH_SECRET: ${AUTH_SECRET:-startrace-local-compose-secret}
+      DEV_AUTH_BYPASS: ${DEV_AUTH_BYPASS:-1}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+    volumes:
+      - .:/app
+      - worker_node_modules:/app/node_modules
+      - worker_tmp:/tmp/startrace
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   xhs_pgdata:
     name: xhs_benchmark_pgdata
+  redis_data:
+  web_node_modules:
+  worker_node_modules:
+  next_cache:
+  worker_tmp:

@@ -1,0 +1,29 @@
+{
+  "data": {
+    "aweme_detail": {
+      "aweme_id": "7420000000000000001",
+      "desc": "三步拆解一个实用选题",
+      "create_time": 1728000000,
+      "duration": 18200,
+      "author": {
+        "sec_uid": "MS4wLjABAAAAfixture",
+        "nickname": "测试创作者"
+      },
+      "statistics": {
+        "play_count": 18000,
+        "digg_count": 920,
+        "comment_count": 64,
+        "share_count": 81,
+        "collect_count": 243
+      },
+      "video": {
+        "play_addr": {
+          "url_list": ["https://media.example/fixture.mp4"]
+        },
+        "cover": {
+          "url_list": ["https://media.example/fixture.jpg"]
+        }
+      }
+    }
+  }
+}

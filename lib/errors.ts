@@ -1,7 +1,14 @@
 export type AppErrorCode =
   | "UNAUTHORIZED"
+  | "FORBIDDEN"
   | "VALIDATION_ERROR"
   | "NOT_FOUND"
+  | "CONFLICT"
+  | "DEPENDENCY_UNAVAILABLE"
+  | "CREDENTIAL_NOT_CONFIGURED"
+  | "CREDENTIAL_INVALID"
+  | "JOB_FAILED"
+  | "PROVIDER_ERROR"
   | "XHS_FETCH_FAILED"
   | "XHS_MANUAL_REQUIRED"
   | "AI_NOT_CONFIGURED"
@@ -44,7 +51,11 @@ export function toErrorResponse(error: unknown): {
   }
 
   const message =
-    error instanceof Error ? error.message : "Internal server error";
+    process.env.NODE_ENV === "production"
+      ? "Internal server error"
+      : error instanceof Error
+        ? error.message
+        : "Internal server error";
 
   return {
     status: 500,

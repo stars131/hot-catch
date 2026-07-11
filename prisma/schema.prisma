@@ -9,6 +9,12 @@ datasource db {
 
 enum Platform {
   xiaohongshu
+  douyin
+}
+
+enum ContentKind {
+  xhs_graphic
+  douyin_video_script
 }
 
 enum FetchStatus {
@@ -37,6 +43,8 @@ enum InputType {
   xhs_id
   xhs_profile_url
   xhs_note_url
+  douyin_profile_url
+  douyin_video_url
   topic
   idea
   draft
@@ -50,20 +58,242 @@ enum AnalysisType {
   fusion
 }
 
+enum InvitationStatus {
+  pending
+  accepted
+  revoked
+  expired
+}
+
+enum CredentialProvider {
+  tikhub
+  qwen_asr
+  aitoearn
+  deepseek
+  firecrawl
+  xiaohongshu_cookie
+}
+
+enum CredentialStatus {
+  active
+  invalid
+  revoked
+}
+
+enum JobType {
+  ingest
+  analysis
+  publish
+  metrics
+}
+
+enum JobStatus {
+  queued
+  running
+  waiting_input
+  succeeded
+  failed
+  canceled
+}
+
+enum IdeaSource {
+  hotspot
+  manual
+  reference
+}
+
+enum IdeaStatus {
+  saved
+  planning
+  creating
+  published
+  archived
+}
+
+enum StyleProfileStatus {
+  draft
+  in_review
+  approved
+  archived
+}
+
+enum RevisionSource {
+  generated
+  manual
+  restored
+}
+
+enum RubricStatus {
+  draft
+  active
+  archived
+}
+
+enum PublishStatus {
+  draft
+  scheduled
+  uploading
+  submitted
+  awaiting_user
+  published
+  failed
+  canceled
+}
+
+enum MetricWindow {
+  d1
+  d3
+  d7
+  manual
+}
+
+enum RetrospectiveStatus {
+  pending
+  drafted
+  accepted
+  dismissed
+}
+
 model User {
-  id            String              @id @default(cuid())
-  email         String?             @unique
-  name          String?
-  avatarUrl     String?
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  personas      Persona[]
-  accounts      BenchmarkAccount[]
-  conversations Conversation[]
-  contents      GeneratedContent[]
-  fetchLogs     FetchLog[]
-  aiLogs        AiCallLog[]
-  analyses      BenchmarkAnalysis[]
+  id                 String                @id @default(cuid())
+  email              String?               @unique
+  emailVerified      DateTime?
+  name               String?
+  image              String?
+  avatarUrl          String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  authAccounts       Account[]
+  sessions           Session[]
+  acceptedInvitation Invitation?           @relation("AcceptedInvitation")
+  personas           Persona[]
+  accounts           BenchmarkAccount[]
+  conversations      Conversation[]
+  contents           GeneratedContent[]
+  fetchLogs          FetchLog[]
+  aiLogs             AiCallLog[]
+  analyses           BenchmarkAnalysis[]
+  credentials        ProviderCredential[]
+  jobs               ProcessingJob[]
+  trendTopics        TrendTopic[]
+  trendObservations  TrendObservation[]
+  ideas              Idea[]
+  styleProfiles      CreatorStyleProfile[]
+  styleEvidence      StyleEvidence[]
+  contentRevisions   ContentRevision[]
+  scoringRubrics     ScoringRubric[]
+  publishRecords     PublishRecord[]
+  metricSnapshots    MetricSnapshot[]
+  retrospectives     Retrospective[]
+  agentRuns          AgentRun[]
+  contentReferences  ContentReference[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Invitation {
+  id               String           @id @default(cuid())
+  email            String           @unique
+  tokenHash        String           @unique
+  status           InvitationStatus @default(pending)
+  expiresAt        DateTime
+  acceptedAt       DateTime?
+  acceptedByUserId String?          @unique
+  createdBy        String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  acceptedBy       User?            @relation("AcceptedInvitation", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([status, expiresAt])
+}
+
+model ProviderCredential {
+  id               String             @id @default(cuid())
+  userId           String
+  provider         CredentialProvider
+  encryptedPayload String
+  keyHint          String?
+  status           CredentialStatus   @default(active)
+  metadata         Json?
+  lastValidatedAt  DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@index([userId, status])
+}
+
+model ProcessingJob {
+  id             String    @id @default(cuid())
+  userId         String
+  type           JobType
+  queueName      String
+  status         JobStatus @default(queued)
+  progress       Int       @default(0)
+  stage          String?
+  input          Json
+  output         Json?
+  resultType     String?
+  resultId       String?
+  errorCode      String?
+  errorMessage   String?
+  providerJobId  String?
+  idempotencyKey String?
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(3)
+  action         String?
+  agentRunId     String?
+  parentJobId    String?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  canceledAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agentRun       AgentRun? @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
+  parentJob      ProcessingJob?  @relation("JobChain", fields: [parentJobId], references: [id], onDelete: SetNull)
+  childJobs      ProcessingJob[] @relation("JobChain")
+
+  @@unique([userId, type, idempotencyKey])
+  @@index([userId, status, createdAt])
+  @@index([queueName, status])
+  @@index([agentRunId])
+  @@index([parentJobId])
 }
 
 model Persona {
@@ -101,63 +331,74 @@ model Persona {
 }
 
 model BenchmarkAccount {
-  id             String              @id @default(cuid())
-  userId         String
-  platform       Platform            @default(xiaohongshu)
-  xhsId          String?
-  nickname       String?
-  avatarUrl      String?
-  profileUrl     String?
-  description    String?
-  category       String?
-  followerCount  Int?
-  followingCount Int?
-  likedCount     Int?
-  noteCount      Int?
-  rawData        Json?
-  sourceType     String?
-  sourceUrl      String?
-  dataConfidence Float?
-  fetchStatus    FetchStatus         @default(pending)
-  lastFetchedAt  DateTime?
-  userRemark     String?
-  groupName      String?
-  isFavorite     Boolean             @default(false)
-  isArchived     Boolean             @default(false)
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
-  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  notes          BenchmarkNote[]
-  analyses       BenchmarkAnalysis[]
+  id                String              @id @default(cuid())
+  userId            String
+  platform          Platform            @default(xiaohongshu)
+  platformAccountId String?
+  xhsId             String?
+  nickname          String?
+  avatarUrl         String?
+  profileUrl        String?
+  description       String?
+  category          String?
+  followerCount     Int?
+  followingCount    Int?
+  likedCount        Int?
+  noteCount         Int?
+  rawData           Json?
+  sourceType        String?
+  sourceUrl         String?
+  dataConfidence    Float?
+  fetchStatus       FetchStatus         @default(pending)
+  lastFetchedAt     DateTime?
+  userRemark        String?
+  groupName         String?
+  isFavorite        Boolean             @default(false)
+  isArchived        Boolean             @default(false)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notes             BenchmarkNote[]
+  analyses          BenchmarkAnalysis[]
 
-  @@index([userId])
+  @@unique([userId, platform, platformAccountId])
+  @@index([userId, platform])
   @@index([xhsId])
   @@index([profileUrl])
 }
 
 model BenchmarkNote {
-  id             String            @id @default(cuid())
-  accountId      String?
-  noteId         String?
-  noteUrl        String?
-  title          String?
-  content        String?
-  coverUrl       String?
-  publishTime    DateTime?
-  likeCount      Int?
-  collectCount   Int?
-  commentCount   Int?
-  shareCount     Int?
-  tags           String[]          @default([])
-  rawData        Json?
-  sourceType     String?
-  dataConfidence Float?
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  account        BenchmarkAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  id                String            @id @default(cuid())
+  accountId         String?
+  noteId            String?
+  platformContentId String?
+  noteUrl           String?
+  title             String?
+  content           String?
+  contentType       String?
+  coverUrl          String?
+  durationSec       Int?
+  transcript        String?
+  analysis          Json?
+  publishTime       DateTime?
+  likeCount         Int?
+  collectCount      Int?
+  commentCount      Int?
+  shareCount        Int?
+  tags              String[]          @default([])
+  rawData           Json?
+  sourceType        String?
+  dataConfidence    Float?
+  metricsUpdatedAt  DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  account           BenchmarkAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  styleEvidence     StyleEvidence[]
 
+  @@unique([accountId, platformContentId])
   @@index([accountId])
   @@index([noteId])
+  @@index([platformContentId])
   @@index([noteUrl])
 }
 
@@ -190,61 +431,312 @@ model BenchmarkAnalysis {
   @@index([accountId])
 }
 
+model TrendTopic {
+  id              String             @id @default(cuid())
+  userId          String
+  platform        Platform
+  normalizedKey   String
+  title           String
+  summary         String?
+  category        String?
+  currentRank     Int?
+  currentScore    Float?
+  firstObservedAt DateTime           @default(now())
+  lastObservedAt  DateTime           @default(now())
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  observations    TrendObservation[]
+  ideas           Idea[]
+
+  @@unique([userId, platform, normalizedKey])
+  @@index([userId, lastObservedAt])
+}
+
+model TrendObservation {
+  id           String     @id @default(cuid())
+  userId       String
+  trendTopicId String
+  source       String
+  sourceUrl    String?
+  rank         Int?
+  score        Float?
+  metrics      Json?
+  evidence     Json?
+  observedAt   DateTime   @default(now())
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trendTopic   TrendTopic @relation(fields: [trendTopicId], references: [id], onDelete: Cascade)
+
+  @@index([userId, observedAt])
+  @@index([trendTopicId, observedAt])
+}
+
+model Idea {
+  id           String             @id @default(cuid())
+  userId       String
+  trendTopicId String?
+  platform     Platform?
+  source       IdeaSource         @default(manual)
+  status       IdeaStatus         @default(saved)
+  title        String
+  angle        String?
+  audience     String?
+  notes        String?
+  evidence     Json?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trendTopic   TrendTopic?        @relation(fields: [trendTopicId], references: [id], onDelete: SetNull)
+  contents     GeneratedContent[]
+
+  @@index([userId, status, updatedAt])
+  @@index([trendTopicId])
+}
+
+model CreatorStyleProfile {
+  id             String             @id @default(cuid())
+  userId         String
+  platform       Platform
+  name           String
+  status         StyleProfileStatus @default(draft)
+  summary        String?
+  themes         Json?
+  hooks          Json?
+  pacing         Json?
+  tone           Json?
+  visualLanguage Json?
+  boundaries     Json?
+  confidence     Float?
+  approvedAt     DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  evidence       StyleEvidence[]
+  contents       GeneratedContent[]
+
+  @@index([userId, platform, status])
+}
+
+model StyleEvidence {
+  id                String              @id @default(cuid())
+  userId            String
+  styleProfileId    String
+  benchmarkNoteId   String?
+  platformContentId String?
+  sourceUrl         String?
+  excerpt           String?
+  insight           String
+  dimension         String
+  confidence        Float?
+  createdAt         DateTime            @default(now())
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  styleProfile      CreatorStyleProfile @relation(fields: [styleProfileId], references: [id], onDelete: Cascade)
+  benchmarkNote     BenchmarkNote?      @relation(fields: [benchmarkNoteId], references: [id], onDelete: SetNull)
+
+  @@index([userId, styleProfileId])
+  @@index([benchmarkNoteId])
+}
+
 model Conversation {
-  id        String    @id @default(cuid())
+  id        String             @id @default(cuid())
   userId    String
   title     String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages  Message[]
   contents  GeneratedContent[]
+  agentRuns AgentRun[]
 
   @@index([userId])
 }
 
 model Message {
-  id             String       @id @default(cuid())
-  conversationId String
-  role           MessageRole
-  content        String
-  metadata       Json?
-  createdAt      DateTime     @default(now())
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  id              String        @id @default(cuid())
+  conversationId  String
+  role            MessageRole
+  content         String
+  metadata        Json?
+  status          MessageStatus @default(complete)
+  protocolVersion Int           @default(1)
+  clientMessageId String?
+  createdAt       DateTime      @default(now())
+  conversation    Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
+  @@unique([conversationId, clientMessageId])
   @@index([conversationId])
+  @@index([conversationId, createdAt])
 }
 
 model GeneratedContent {
-  id                    String          @id @default(cuid())
+  id                    String               @id @default(cuid())
   userId                String
   conversationId        String?
   personaId             String?
+  ideaId                String?
+  styleProfileId        String?
+  scoringRubricId       String?
+  platform              Platform             @default(xiaohongshu)
+  contentKind           ContentKind          @default(xhs_graphic)
   title                 String?
   inputType             InputType?
   inputText             String?
-  selectedAccountIds    String[]        @default([])
-  outputType            String          @default("xhs_graphic")
+  selectedAccountIds    String[]             @default([])
+  outputType            String               @default("xhs_graphic")
   generatedTitleOptions Json?
   coverTextOptions      Json?
   pageStructure         Json?
+  scriptSpec            Json?
   bodyText              String?
-  tags                  String[]        @default([])
+  tags                  String[]             @default([])
   interactionEnding     String?
   benchmarkExplanation  String?
   riskNotes             String?
   fullMarkdown          String?
-  status                ContentStatus   @default(draft)
+  scoreSnapshot         Json?
+  status                ContentStatus        @default(draft)
   modelName             String?
   promptVersion         String?
-  createdAt             DateTime        @default(now())
-  updatedAt             DateTime        @updatedAt
-  user                  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  conversation          Conversation?   @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-  persona               Persona?        @relation(fields: [personaId], references: [id], onDelete: SetNull)
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  user                  User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation          Conversation?        @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  persona               Persona?             @relation(fields: [personaId], references: [id], onDelete: SetNull)
+  idea                  Idea?                @relation(fields: [ideaId], references: [id], onDelete: SetNull)
+  styleProfile          CreatorStyleProfile? @relation(fields: [styleProfileId], references: [id], onDelete: SetNull)
+  scoringRubric         ScoringRubric?       @relation(fields: [scoringRubricId], references: [id], onDelete: SetNull)
+  revisions             ContentRevision[]
+  publishRecords        PublishRecord[]
+  retrospectives        Retrospective[]
+  contentReferences     ContentReference[]
 
-  @@index([userId])
+  @@index([userId, platform, updatedAt])
   @@index([conversationId])
+  @@index([ideaId])
+}
+
+model ContentRevision {
+  id                String           @id @default(cuid())
+  userId            String
+  contentId         String
+  revisionNumber    Int
+  source            RevisionSource   @default(manual)
+  title             String?
+  bodyText          String?
+  structuredContent Json?
+  fullMarkdown      String?
+  checksum          String
+  originJobId       String?          @unique
+  provenance        Json?
+  createdAt         DateTime         @default(now())
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content           GeneratedContent @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  publishRecords    PublishRecord[]
+
+  @@unique([contentId, revisionNumber])
+  @@index([userId, createdAt])
+}
+
+model ScoringRubric {
+  id             String             @id @default(cuid())
+  userId         String
+  platform       Platform
+  contentKind    ContentKind
+  name           String
+  version        Int
+  status         RubricStatus       @default(draft)
+  rules          Json
+  backtestResult Json?
+  approvedAt     DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contents       GeneratedContent[]
+  retrospectives Retrospective[]
+
+  @@unique([userId, platform, contentKind, version])
+  @@index([userId, status])
+}
+
+model PublishRecord {
+  id                String           @id @default(cuid())
+  userId            String
+  contentId         String
+  revisionId        String?
+  platform          Platform
+  status            PublishStatus    @default(draft)
+  provider          String           @default("aitoearn")
+  providerAccountId String?
+  providerFlowId    String?
+  providerRecordId  String?
+  idempotencyKey    String           @unique
+  scheduledAt       DateTime?
+  submittedAt       DateTime?
+  publishedAt       DateTime?
+  shortLink         String?
+  publicUrl         String?
+  requestPayload    Json?
+  providerResponse  Json?
+  failureCode       String?
+  failureReason     String?
+  attemptCount      Int              @default(0)
+  lastSyncedAt      DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content           GeneratedContent @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  revision          ContentRevision? @relation(fields: [revisionId], references: [id], onDelete: SetNull)
+  metricSnapshots   MetricSnapshot[]
+  retrospectives    Retrospective[]
+
+  @@index([userId, status, updatedAt])
+  @@index([providerRecordId])
+}
+
+model MetricSnapshot {
+  id              String        @id @default(cuid())
+  userId          String
+  publishRecordId String
+  window          MetricWindow
+  observedAt      DateTime      @default(now())
+  viewCount       Int?
+  likeCount       Int?
+  collectCount    Int?
+  commentCount    Int?
+  shareCount      Int?
+  followerDelta   Int?
+  rawData         Json?
+  createdAt       DateTime      @default(now())
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  publishRecord   PublishRecord @relation(fields: [publishRecordId], references: [id], onDelete: Cascade)
+
+  @@unique([publishRecordId, window])
+  @@index([userId, observedAt])
+}
+
+model Retrospective {
+  id              String              @id @default(cuid())
+  userId          String
+  contentId       String
+  publishRecordId String?
+  scoringRubricId String?
+  status          RetrospectiveStatus @default(pending)
+  dueAt           DateTime?
+  predictedScore  Json?
+  actualOutcome   Json?
+  variance        Json?
+  conclusions     String?
+  ruleProposal    Json?
+  resolvedAt      DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content         GeneratedContent    @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  publishRecord   PublishRecord?      @relation(fields: [publishRecordId], references: [id], onDelete: SetNull)
+  scoringRubric   ScoringRubric?      @relation(fields: [scoringRubricId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status, dueAt])
+  @@index([publishRecordId])
 }
 
 model FetchLog {
@@ -257,7 +749,7 @@ model FetchLog {
   errorMessage String?
   rawResponse  Json?
   createdAt    DateTime    @default(now())
-  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user         User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([userId])
 }
@@ -290,4 +782,71 @@ model AiCallLog {
   user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([userId])
+}
+
+// ---------- C1: star-chat/v1 协议、AgentRun 与内容参考 ----------
+
+enum MessageStatus {
+  pending
+  complete
+  failed
+}
+
+enum AgentRunStatus {
+  pending
+  running
+  waiting_input
+  completed
+  failed
+  canceled
+}
+
+enum ContentReferenceRole {
+  inspiration
+  facts
+  structure
+  style
+}
+
+model AgentRun {
+  id                 String          @id @default(cuid())
+  userId             String
+  conversationId     String?
+  requestMessageId   String?
+  assistantMessageId String?
+  status             AgentRunStatus  @default(pending)
+  command            String?
+  input              Json?
+  output             Json?
+  errorCode          String?
+  errorMessage       String?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  user               User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation       Conversation?   @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  jobs               ProcessingJob[]
+
+  @@index([userId, status, createdAt])
+  @@index([conversationId])
+}
+
+model ContentReference {
+  id                 String               @id @default(cuid())
+  userId             String
+  contentId          String
+  benchmarkAccountId String?
+  benchmarkNoteId    String?
+  ideaId             String?
+  role               ContentReferenceRole @default(inspiration)
+  sourceUrl          String?
+  fingerprint        String
+  snapshot           Json
+  createdAt          DateTime             @default(now())
+  user               User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content            GeneratedContent     @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  @@unique([contentId, fingerprint, role])
+  @@index([userId, contentId])
 }

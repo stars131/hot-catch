@@ -1,0 +1,16 @@
+{
+  "data": {
+    "id": "record-fixture-1",
+    "flowId": "flow-fixture-1",
+    "taskId": "task-fixture-1",
+    "accountId": "douyin_test_account",
+    "accountType": "douyin",
+    "type": "video",
+    "status": 8,
+    "title": "测试视频",
+    "errorMsg": ""
+  },
+  "code": 0,
+  "message": "请求成功",
+  "requestId": "fixture-request"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "chatcmpl-asr-fixture",
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "先给结论，再用三个具体步骤解释，最后提醒观众收藏。"
+      }
+    }
+  ]
+}

@@ -1,0 +1,195 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown, Link2, Plus, Puzzle, Send, Upload, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+export type ComposerContextChip = {
+  id: string;
+  kind: "idea" | "content";
+  label: string;
+};
+
+const PLATFORM_LABEL = { xiaohongshu: "小红书", douyin: "抖音" } as const;
+
+export function CreatorComposer(props: {
+  platform: "xiaohongshu" | "douyin";
+  value: string;
+  busy: boolean;
+  chips: ComposerContextChip[];
+  onChange: (value: string) => void;
+  onSend: () => void;
+  onRemoveChip: (id: string) => void;
+  onSwitchPlatform: (platform: "xiaohongshu" | "douyin") => void;
+}) {
+  const [plusOpen, setPlusOpen] = useState(false);
+  const [platformOpen, setPlatformOpen] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  // 自适应高度,约 8 行后内部滚动
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "0px";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 208)}px`;
+  }, [props.value]);
+
+  useEffect(() => {
+    function onPointerDown(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setPlusOpen(false);
+        setPlatformOpen(false);
+      }
+    }
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, []);
+
+  const canSend = props.value.trim().length > 0 && !props.busy;
+
+  return (
+    <div ref={rootRef} className="mx-auto w-full max-w-3xl">
+      {props.chips.length > 0 ? (
+        <div className="mb-2 flex flex-wrap gap-1.5" data-testid="composer-chips">
+          {props.chips.map((chip) => (
+            <span
+              key={chip.id}
+              className="inline-flex max-w-full items-center gap-1 rounded-lg border border-[#DDD7CE] bg-[#FFFDF9] py-1 pl-2.5 pr-1 text-xs text-[#1F1D19]"
+            >
+              <span className="truncate">
+                {chip.kind === "idea" ? "选题:" : "项目:"}
+                {chip.label}
+              </span>
+              <button
+                type="button"
+                className="rounded p-0.5 text-[#746F67] hover:bg-[#EDE9E0] hover:text-[#1F1D19]"
+                onClick={() => props.onRemoveChip(chip.id)}
+                aria-label={`移除上下文 ${chip.label}`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="relative rounded-[22px] border border-[#DDD7CE] bg-[#FFFDF9] shadow-[0_2px_12px_rgba(31,29,25,0.06)]">
+        <textarea
+          ref={textareaRef}
+          value={props.value}
+          onChange={(event) => props.onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              if (canSend) props.onSend();
+            }
+          }}
+          rows={1}
+          placeholder="告诉星迹你想创作什么…"
+          aria-label="创作输入框"
+          className="block w-full resize-none bg-transparent px-4 pb-12 pt-3.5 text-[15px] leading-6 text-[#1F1D19] outline-none placeholder:text-[#746F67]"
+        />
+
+        <div className="absolute inset-x-2 bottom-2 flex items-center gap-1">
+          {/* + 菜单:未实现能力明确标注,不假装成功 */}
+          <div className="relative">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="rounded-lg text-[#746F67] hover:bg-[#EDE9E0] hover:text-[#1F1D19]"
+              aria-label="添加资料"
+              aria-expanded={plusOpen}
+              onClick={() => {
+                setPlusOpen((open) => !open);
+                setPlatformOpen(false);
+              }}
+            >
+              <Plus className="h-5 w-5" />
+            </Button>
+            {plusOpen ? (
+              <div className="absolute bottom-11 left-0 z-20 w-52 rounded-xl border border-[#DDD7CE] bg-[#FFFDF9] p-1.5 shadow-[0_8px_24px_rgba(31,29,25,0.12)]">
+                {[
+                  { icon: Upload, label: "上传素材" },
+                  { icon: Link2, label: "导入链接" },
+                  { icon: Puzzle, label: "技能" },
+                ].map((item) => (
+                  <button
+                    key={item.label}
+                    type="button"
+                    disabled
+                    className="flex w-full cursor-not-allowed items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-[#746F67] opacity-70"
+                  >
+                    <item.icon className="h-4 w-4" />
+                    {item.label}
+                    <span className="ml-auto rounded bg-[#EDE9E0] px-1.5 py-0.5 text-[10px]">
+                      即将支持
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          {/* 平台切换:上下文状态,不是两套布局 */}
+          <div className="relative">
+            <button
+              type="button"
+              className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm text-[#1F1D19] hover:bg-[#EDE9E0]"
+              aria-expanded={platformOpen}
+              aria-label="选择平台"
+              data-testid="platform-switcher"
+              onClick={() => {
+                setPlatformOpen((open) => !open);
+                setPlusOpen(false);
+              }}
+            >
+              {PLATFORM_LABEL[props.platform]}
+              <ChevronDown className="h-3.5 w-3.5 text-[#746F67]" />
+            </button>
+            {platformOpen ? (
+              <div className="absolute bottom-11 left-0 z-20 w-40 rounded-xl border border-[#DDD7CE] bg-[#FFFDF9] p-1.5 shadow-[0_8px_24px_rgba(31,29,25,0.12)]">
+                {(Object.keys(PLATFORM_LABEL) as Array<"xiaohongshu" | "douyin">).map(
+                  (platform) => (
+                    <button
+                      key={platform}
+                      type="button"
+                      className={cn(
+                        "flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm hover:bg-[#EDE9E0]",
+                        platform === props.platform && "font-medium text-[#C83B32]",
+                      )}
+                      onClick={() => {
+                        setPlatformOpen(false);
+                        if (platform !== props.platform) props.onSwitchPlatform(platform);
+                      }}
+                    >
+                      {PLATFORM_LABEL[platform]}
+                      {platform === "xiaohongshu" ? "图文" : "脚本"}
+                    </button>
+                  ),
+                )}
+              </div>
+            ) : null}
+          </div>
+
+          <Button
+            type="button"
+            size="icon"
+            className="ml-auto rounded-full bg-[#C83B32] text-[#FFFDF9] hover:bg-[#B3352D] disabled:opacity-40"
+            disabled={!canSend}
+            onClick={props.onSend}
+            aria-label="发送"
+          >
+            <Send className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      <p className="mt-1.5 hidden text-center text-[11px] text-[#67625A] sm:block">
+        Enter 发送,Shift+Enter 换行
+      </p>
+    </div>
+  );
+}

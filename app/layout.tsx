@@ -3,8 +3,8 @@ import "./globals.css";
 import { Providers } from "@/components/providers";
 
 export const metadata: Metadata = {
-  title: "XHS Benchmark Copilot",
-  description: "A Xiaohongshu benchmark analysis and content drafting assistant.",
+  title: "星迹内容助手",
+  description: "从热点研究、内容创作到发布复盘的个人创作者工作台。",
 };
 
 export default function RootLayout({

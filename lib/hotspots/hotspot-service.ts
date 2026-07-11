@@ -1,3 +1,6 @@
+import { getStoredHotspotCookieConfig } from "@/lib/hotspots/cookie-store";
+import type { UserHotspotCookieStore } from "@/lib/hotspots/user-cookie-store";
+
 export type HotspotPlatformCode =
   | "baidu"
   | "weibo"
@@ -69,6 +72,10 @@ export type HotspotSourceDefinition = {
   apiPath: string;
   requiresCookie: boolean;
   cookieConfigured: boolean;
+  environmentCookieConfigured?: boolean;
+  environmentUpstreamConfigured?: boolean;
+  localCookieConfigured?: boolean;
+  localUpstreamConfigured?: boolean;
   cookieEnv?: string;
   upstreamEnv?: string;
   notes?: string;
@@ -485,22 +492,29 @@ const STOP_WORDS = new Set([
 
 let cachedPayload: { expiresAt: number; payload: HotspotPayload } | null = null;
 
+export function clearHotspotCache() {
+  cachedPayload = null;
+}
+
 export async function getHotspotPayload(params?: {
   refresh?: boolean;
   limit?: number;
+  credentialStore?: UserHotspotCookieStore;
 }): Promise<HotspotPayload> {
   const now = Date.now();
-  if (!params?.refresh && cachedPayload && cachedPayload.expiresAt > now) {
+  if (!params?.credentialStore && !params?.refresh && cachedPayload && cachedPayload.expiresAt > now) {
     return cachedPayload.payload;
   }
 
-  const results = await Promise.allSettled(SOURCES.map(fetchSourceItems));
+  const results = await Promise.allSettled(
+    SOURCES.map((source) => fetchSourceItems(source, params?.credentialStore)),
+  );
   const sourceHealth: HotspotSourceHealth[] = [];
   const allItems: HotspotSourceItem[] = [];
 
   results.forEach((result, index) => {
     const source = SOURCES[index];
-    const definition = toSourceDefinition(source);
+    const definition = toSourceDefinition(source, params?.credentialStore);
     if (result.status === "fulfilled") {
       const backends = Array.from(new Set(result.value.map((item) => item.backend)));
       sourceHealth.push({
@@ -530,7 +544,7 @@ export async function getHotspotPayload(params?: {
 
   const topics = buildTopics(allItems).slice(0, params?.limit ?? 36);
   const activeBackends = new Set(allItems.map((item) => item.backend));
-  const sourceCatalog = listHotspotSourceDefinitions();
+  const sourceCatalog = listHotspotSourceDefinitions(params?.credentialStore);
   const payload: HotspotPayload = {
     generatedAt: new Date().toISOString(),
     platforms: [
@@ -562,19 +576,26 @@ export async function getHotspotPayload(params?: {
     },
   };
 
-  cachedPayload = { expiresAt: now + HOTSPOT_CACHE_MS, payload };
+  if (!params?.credentialStore) {
+    cachedPayload = { expiresAt: now + HOTSPOT_CACHE_MS, payload };
+  }
   return payload;
 }
 
-export function listHotspotSourceDefinitions(): HotspotSourceDefinition[] {
-  return SOURCES.map(toSourceDefinition);
+export function listHotspotSourceDefinitions(
+  credentialStore?: UserHotspotCookieStore,
+): HotspotSourceDefinition[] {
+  return SOURCES.map((source) => toSourceDefinition(source, credentialStore));
 }
 
-export async function getHotspotSourcePayload(code: string): Promise<HotspotSourceApiPayload> {
+export async function getHotspotSourcePayload(
+  code: string,
+  credentialStore?: UserHotspotCookieStore,
+): Promise<HotspotSourceApiPayload> {
   const source = getSourceByCode(code);
-  const definition = toSourceDefinition(source);
+  const definition = toSourceDefinition(source, credentialStore);
   try {
-    const items = await fetchSourceItems(source);
+    const items = await fetchSourceItems(source, credentialStore);
     const backends = Array.from(new Set(items.map((item) => item.backend)));
     return {
       generatedAt: new Date().toISOString(),
@@ -610,7 +631,10 @@ export async function getHotspotSourcePayload(code: string): Promise<HotspotSour
   }
 }
 
-async function fetchSourceItems(source: HotspotSource): Promise<HotspotSourceItem[]> {
+async function fetchSourceItems(
+  source: HotspotSource,
+  credentialStore?: UserHotspotCookieStore,
+): Promise<HotspotSourceItem[]> {
   const attempts: Array<Promise<HotspotSourceItem[]>> = [];
 
   if (source.orzPlatform) {
@@ -623,7 +647,7 @@ async function fetchSourceItems(source: HotspotSource): Promise<HotspotSourceIte
     attempts.push(fetchSixtySecondItems(source));
   }
   if (source.cookieBackend) {
-    attempts.push(fetchCookieBackendItems(source));
+    attempts.push(fetchCookieBackendItems(source, credentialStore));
   }
   if (source.nativeFetcher) {
     attempts.push(source.nativeFetcher(source));
@@ -671,14 +695,18 @@ async function fetchSixtySecondItems(source: HotspotSource): Promise<HotspotSour
   return normalizeItems(extractItemArray(json), source, "60s");
 }
 
-async function fetchCookieBackendItems(source: HotspotSource): Promise<HotspotSourceItem[]> {
+async function fetchCookieBackendItems(
+  source: HotspotSource,
+  credentialStore?: UserHotspotCookieStore,
+): Promise<HotspotSourceItem[]> {
   const config = getCookieBackend(source.code);
   if (!config) {
     throw new Error(`${source.label} 没有 Cookie 聚合配置`);
   }
 
-  const configuredUpstream = process.env[config.upstreamEnv];
-  const cookie = process.env[config.cookieEnv];
+  const stored = credentialStore?.[source.code] ?? getStoredHotspotCookieConfig(source.code);
+  const configuredUpstream = process.env[config.upstreamEnv] || stored?.upstream;
+  const cookie = process.env[config.cookieEnv] || stored?.cookie;
   if (!configuredUpstream && !cookie) {
     throw new Error(`${source.label} Cookie 聚合待配置：设置 ${config.cookieEnv} 或 ${config.upstreamEnv}`);
   }
@@ -1294,15 +1322,31 @@ function seededRandom(seed: number) {
   };
 }
 
-function toSourceDefinition(source: HotspotSource): HotspotSourceDefinition {
+function toSourceDefinition(
+  source: HotspotSource,
+  credentialStore?: UserHotspotCookieStore,
+): HotspotSourceDefinition {
   const cookieBackend = getCookieBackend(source.code);
+  const stored = credentialStore?.[source.code] ?? getStoredHotspotCookieConfig(source.code);
+  const environmentCookieConfigured = cookieBackend ? Boolean(process.env[cookieBackend.cookieEnv]) : false;
+  const environmentUpstreamConfigured = cookieBackend ? Boolean(process.env[cookieBackend.upstreamEnv]) : false;
+  const localCookieConfigured = Boolean(stored?.cookie);
+  const localUpstreamConfigured = Boolean(stored?.upstream);
   return {
     code: source.code,
     label: source.label,
     category: source.category,
     apiPath: `/api/hotspots/sources/${source.code}`,
     requiresCookie: Boolean(cookieBackend),
-    cookieConfigured: cookieBackend ? Boolean(process.env[cookieBackend.cookieEnv] || process.env[cookieBackend.upstreamEnv]) : false,
+    cookieConfigured:
+      environmentCookieConfigured ||
+      environmentUpstreamConfigured ||
+      localCookieConfigured ||
+      localUpstreamConfigured,
+    environmentCookieConfigured,
+    environmentUpstreamConfigured,
+    localCookieConfigured,
+    localUpstreamConfigured,
     cookieEnv: cookieBackend?.cookieEnv,
     upstreamEnv: cookieBackend?.upstreamEnv,
     notes: cookieBackend?.notes,

@@ -1,0 +1,13 @@
+{
+  "data": {
+    "recordId": "record-fixture-1",
+    "platform": "douyin",
+    "shareId": "share-fixture-1",
+    "schemeUrl": "snssdk1128://publish",
+    "shortLink": "https://v.douyin.com/fixture/",
+    "expiresAt": "2026-07-12T00:00:00.000Z"
+  },
+  "code": 0,
+  "message": "请求成功",
+  "requestId": "fixture-request"
+}
