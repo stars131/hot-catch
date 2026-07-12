@@ -254,7 +254,7 @@ test.describe("C8 发布确认(桌面 1440×900)", () => {
       timeout: 20000,
     });
     await expect(page.getByTestId("publish-connection-required")).toContainText(
-      "连接未就绪",
+      "连接未配置",
     );
     await assertNoHorizontalOverflow(page, 1440);
     await page.screenshot({ path: path.join(SHOT_DIR, "desktop-1440-publish-handoff.png") });

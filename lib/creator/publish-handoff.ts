@@ -1,6 +1,7 @@
-import { CredentialProvider, PublishStatus } from "@prisma/client";
+import { PublishStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/lib/errors";
+import { getAiToEarnConnectionStatus } from "@/lib/services/connection-service";
 import type {
   CardAction,
   ChatCard,
@@ -50,14 +51,9 @@ const PUBLISH_STATUS_LABEL: Record<string, string> = {
 
 /** 只读本地凭证表;connected 仅代表已配置,不代表真实供应商可用。 */
 export async function getAiToEarnConnectionState(userId: string): Promise<ConnectionState> {
-  const credential = await prisma.providerCredential.findUnique({
-    where: {
-      userId_provider: { userId, provider: CredentialProvider.aitoearn },
-    },
-    select: { status: true },
-  });
-  if (!credential) return "missing";
-  return credential.status === "active" ? "connected" : "invalid";
+  const status = await getAiToEarnConnectionStatus(userId);
+  // 对话卡协议沿用 "missing";连接层 API 对外为 "not_configured"
+  return status.connection === "not_configured" ? "missing" : status.connection;
 }
 
 function connectionItem(connection: ConnectionState): ReadinessItem {

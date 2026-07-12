@@ -1,0 +1,29 @@
+{
+  "code": 0,
+  "data": {
+    "list": [
+      {
+        "id": "acct-xhs-1",
+        "type": "xiaohongshu",
+        "nickname": "星迹小红书号",
+        "account": "xhs_account_1",
+        "avatar": "https://cdn.example/avatar-xhs.png",
+        "status": 0
+      },
+      {
+        "id": "acct-dy-1",
+        "type": "DOUYIN",
+        "nickname": "星迹抖音号",
+        "account": "dy_account_1",
+        "avatar": "https://cdn.example/avatar-dy.png",
+        "status": 1
+      },
+      {
+        "id": "acct-other-1",
+        "type": "kuaishou",
+        "nickname": "不支持的平台",
+        "status": 0
+      }
+    ]
+  }
+}

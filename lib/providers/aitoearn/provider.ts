@@ -15,6 +15,7 @@ import {
   stringValue,
   unwrapData,
 } from "@/lib/providers/aitoearn/normalizer";
+import { AITOEARN_METADATA } from "@/lib/providers/aitoearn/metadata";
 import type { Platform } from "@prisma/client";
 
 export class AiToEarnProvider implements PublishingProvider {
@@ -24,6 +25,10 @@ export class AiToEarnProvider implements PublishingProvider {
     private readonly apiKey: string,
     private readonly baseUrl = env.AITO_EARN_BASE_URL,
   ) {}
+
+  getMetadata() {
+    return AITOEARN_METADATA;
+  }
 
   async getAuthorizationUrl(platform: Platform) {
     const data = asRecord(

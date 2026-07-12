@@ -4,13 +4,30 @@ import { setupServer } from "msw/node";
 import flowCreated from "@/tests/fixtures/aitoearn/flow-created.json";
 import recordAwaitingUser from "@/tests/fixtures/aitoearn/record-awaiting-user.json";
 import userAction from "@/tests/fixtures/aitoearn/user-action.json";
+import accountsFixture from "@/tests/fixtures/aitoearn/accounts.json";
+import authUrlFixture from "@/tests/fixtures/aitoearn/auth-url.json";
+import authStatusFixture from "@/tests/fixtures/aitoearn/auth-status.json";
 import { AiToEarnProvider } from "@/lib/providers/aitoearn/provider";
 
 const baseUrl = "https://aitoearn.test";
 const apiKey = "aitoearn-secret-fixture";
 let submittedFlow: unknown;
+let authRequestUrl: URL | null = null;
 
 const server = setupServer(
+  http.get(`${baseUrl}/api/v2/channels/accounts`, ({ request }) => {
+    if (request.headers.get("X-Api-Key") !== apiKey) return new HttpResponse(null, { status: 401 });
+    return HttpResponse.json(accountsFixture);
+  }),
+  http.get(`${baseUrl}/api/v2/channels/accounts/auth/xiaohongshu`, ({ request }) => {
+    if (request.headers.get("X-Api-Key") !== apiKey) return new HttpResponse(null, { status: 401 });
+    authRequestUrl = new URL(request.url);
+    return HttpResponse.json(authUrlFixture);
+  }),
+  http.get(
+    `${baseUrl}/api/v2/channels/accounts/auth/xiaohongshu/status/auth-session-fixture-1`,
+    () => HttpResponse.json(authStatusFixture),
+  ),
   http.post(`${baseUrl}/api/assets/uploadSign`, ({ request }) => {
     if (request.headers.get("X-Api-Key") !== apiKey) return new HttpResponse(null, { status: 401 });
     return HttpResponse.json({
@@ -42,6 +59,50 @@ afterAll(() => server.close());
 
 describe("AiToEarn provider contract", () => {
   const provider = new AiToEarnProvider(apiKey, baseUrl);
+
+  it("returns local metadata and platform rules without any network call", () => {
+    const metadata = provider.getMetadata();
+    expect(metadata.provider).toBe("aitoearn");
+    expect(metadata.platforms.map((rules) => rules.platform)).toEqual([
+      "xiaohongshu",
+      "douyin",
+    ]);
+    expect(JSON.stringify(metadata)).not.toContain(apiKey);
+  });
+
+  it("maps the authorization intent to url + sessionId without leaking the key", async () => {
+    const intent = await provider.getAuthorizationUrl("xiaohongshu");
+    expect(intent).toEqual({
+      authorizationUrl: "https://auth.aitoearn.test/oauth/xiaohongshu?state=fixture-state",
+      sessionId: "auth-session-fixture-1",
+    });
+    expect(authRequestUrl?.searchParams.get("redirectUri")).toContain("/settings/connections");
+    expect(JSON.stringify(intent)).not.toContain(apiKey);
+  });
+
+  it("queries the authorization session status by sessionId", async () => {
+    await expect(
+      provider.getAuthorizationStatus("xiaohongshu", "auth-session-fixture-1"),
+    ).resolves.toMatchObject({ status: "pending" });
+  });
+
+  it("normalizes accounts and drops unsupported platforms", async () => {
+    const accounts = await provider.listAccounts();
+    expect(accounts).toEqual([
+      expect.objectContaining({
+        id: "acct-xhs-1",
+        platform: "xiaohongshu",
+        name: "星迹小红书号",
+        status: "active",
+      }),
+      expect.objectContaining({
+        id: "acct-dy-1",
+        platform: "douyin",
+        status: "expired",
+      }),
+    ]);
+    expect(JSON.stringify(accounts)).not.toContain(apiKey);
+  });
 
   it("maps upload signing without returning the API key", async () => {
     const signature = await provider.signAssetUpload({

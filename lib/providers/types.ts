@@ -139,12 +139,38 @@ export type ProviderPublishRecord = {
   raw?: unknown;
 };
 
+/** 平台发布规则:本地保守约束,供前端提示与提交前校验;不代表供应商实时配额。 */
+export type PlatformPublishRules = {
+  platform: Platform;
+  displayName: string;
+  assetTypes: Array<"image" | "video">;
+  maxAssets: number;
+  minAssets: number;
+  maxTitleLength: number;
+  maxBodyLength: number;
+  maxAssetSizeMb: number;
+  supportsSchedule: boolean;
+  notes?: string;
+};
+
+/** 供应商连接元数据:静态描述,不包含任何凭证信息。 */
+export type ProviderConnectionMetadata = {
+  provider: string;
+  displayName: string;
+  capabilities: string[];
+  platforms: readonly PlatformPublishRules[];
+};
+
 export interface PublishingProvider {
   readonly name: string;
+  /** 本地静态元数据与平台规则;不触发网络请求。 */
+  getMetadata(): ProviderConnectionMetadata;
   getAuthorizationUrl(platform: Platform): Promise<{
     authorizationUrl: string;
     sessionId: string;
   }>;
+  /** 轮询授权会话结果;sessionId 由 getAuthorizationUrl 返回。 */
+  getAuthorizationStatus(platform: Platform, sessionId: string): Promise<unknown>;
   listAccounts(): Promise<PublishingAccount[]>;
   signAssetUpload(input: {
     fileName: string;
