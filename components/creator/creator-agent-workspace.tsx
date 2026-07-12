@@ -20,9 +20,14 @@ import {
   type ArtifactPendingInsert,
   type ArtifactRefineRequest,
 } from "@/components/creator/artifact/artifact-panel";
-import type { ArtifactCard, PatchCard } from "@/lib/creator/chat-protocol";
+import type {
+  ArtifactCard,
+  PatchCard,
+  PublishReadinessCard,
+} from "@/lib/creator/chat-protocol";
 import type { PatchTarget } from "@/lib/creator/chat-schemas";
 import type { SkillMenuItem } from "@/lib/creator/skill-registry";
+import { missingItemsPrompt } from "@/lib/creator/publish-readiness";
 import {
   actionKeyOf,
   cancelRun,
@@ -113,7 +118,13 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
     null,
   );
   const [pendingInsert, setPendingInsert] = useState<ArtifactPendingInsert | null>(null);
+  /** 就绪卡「打开检查清单」请求;仅对同一内容生效,面板据 nonce 打开一次 */
+  const [checklistRequest, setChecklistRequest] = useState<{
+    contentId: string;
+    nonce: number;
+  } | null>(null);
   const insertNonceRef = useRef(0);
+  const checklistNonceRef = useRef(0);
   const seenArtifactCardIdsRef = useRef<Set<string> | null>(null);
   const localEchoRef = useRef(0);
   const busyRef = useRef(false);
@@ -153,6 +164,7 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
     setLastArtifactContentId(null);
     setPatchTarget(null);
     setPendingInsert(null);
+    setChecklistRequest(null);
     seenArtifactCardIdsRef.current = null;
   }, [conversationId]);
 
@@ -242,8 +254,11 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
   );
 
   const submitText = useCallback(
-    async (text: string) => {
-      if (!text || busy) return;
+    async (
+      text: string,
+      options?: { publishTarget?: { contentId: string } },
+    ): Promise<boolean> => {
+      if (!text || busy) return false;
       setBusy(true);
       busyRef.current = true;
 
@@ -281,7 +296,10 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
               ...(patchTarget.skillId ? { skillId: patchTarget.skillId } : {}),
             }
           : undefined;
-        const result = await sendMessage(activeId, text, { patchTarget: target });
+        const result = await sendMessage(activeId, text, {
+          patchTarget: target,
+          publishTarget: options?.publishTarget,
+        });
         setPatchTarget(null);
         setMessages((current) => [
           ...current.filter((message) => message.id !== echoId),
@@ -289,6 +307,7 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
           result.assistantMessage,
         ]);
         void refreshList();
+        return true;
       } catch (error) {
         setMessages((current) => [
           ...current,
@@ -302,6 +321,7 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
             clientMessageId: null,
           },
         ]);
+        return false;
       } finally {
         setBusy(false);
         busyRef.current = false;
@@ -369,6 +389,7 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
   function handleArtifactOpen(card: ArtifactCard) {
     setArtifactContentId(card.contentId);
     setLastArtifactContentId(card.contentId);
+    setChecklistRequest(null);
     seenArtifactCardIdsRef.current?.add(card.id);
   }
 
@@ -405,6 +426,7 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
   function handlePatchCopyToEditor(card: PatchCard) {
     setArtifactContentId(card.contentId);
     setLastArtifactContentId(card.contentId);
+    setChecklistRequest(null);
     setPendingInsert({
       nonce: ++insertNonceRef.current,
       section: card.section,
@@ -426,6 +448,55 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
     const desktop = window.matchMedia("(min-width: 1180px)").matches;
     if (!desktop) setArtifactContentId(null);
     window.setTimeout(focusComposer, desktop ? 0 : 80);
+  }
+
+  /**
+   * 清单「在对话中发起发布确认」(C8):保存已由面板冲刷完成,
+   * 这里把 publishTarget 随消息提交,服务端生成就绪卡。
+   * <1180px 时 Artifact 全屏覆盖对话,先收起面板让用户看到就绪卡。
+   */
+  async function handlePublishPrepare(params: {
+    contentId: string;
+    title: string;
+  }): Promise<boolean> {
+    const text = `准备发布《${(params.title || "未命名内容").slice(0, 40)}》`;
+    const sent = await submitText(text, {
+      publishTarget: { contentId: params.contentId },
+    });
+    if (sent && !window.matchMedia("(min-width: 1180px)").matches) {
+      setArtifactContentId(null);
+    }
+    return sent;
+  }
+
+  /** 就绪卡「打开检查清单」:打开对应作品的 Artifact 面板并展开清单。 */
+  function handleOpenPublishChecklist(card: PublishReadinessCard) {
+    setArtifactContentId(card.contentId);
+    setLastArtifactContentId(card.contentId);
+    setChecklistRequest({ contentId: card.contentId, nonce: ++checklistNonceRef.current });
+  }
+
+  /** 就绪卡「复制待处理项」:把阻塞/提醒项转成修改指令预填输入框。 */
+  function handleCopyMissingItems(card: PublishReadinessCard) {
+    const prompt = missingItemsPrompt(card.items);
+    setComposerValue(prompt || "请帮我检查这篇内容还有哪些发布前需要完善的地方:");
+    const desktop = window.matchMedia("(min-width: 1180px)").matches;
+    if (!desktop) setArtifactContentId(null);
+    window.setTimeout(focusComposer, desktop ? 0 : 80);
+  }
+
+  /** 「打开发布中心」:应用内跳转 /publish,携带内容预选;不执行卡内任意地址。 */
+  function handleOpenPublishWorkspace(contentId: string | null) {
+    router.push(
+      contentId
+        ? `/publish?contentId=${encodeURIComponent(contentId)}&from=creator`
+        : "/publish?from=creator",
+    );
+  }
+
+  /** 「打开连接设置」:应用内跳转连接设置页。 */
+  function handleOpenConnections() {
+    router.push("/settings/connections");
   }
 
   const handleJobSettled = useCallback(() => {
@@ -519,9 +590,18 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
         artifactContentId ? (
           <ArtifactPanel
             contentId={artifactContentId}
-            onClose={() => setArtifactContentId(null)}
+            onClose={() => {
+              setArtifactContentId(null);
+              setChecklistRequest(null);
+            }}
             onAskRefine={handleArtifactAskRefine}
             pendingInsert={pendingInsert}
+            onPublishPrepare={handlePublishPrepare}
+            openChecklistNonce={
+              checklistRequest && checklistRequest.contentId === artifactContentId
+                ? checklistRequest.nonce
+                : 0
+            }
           />
         ) : undefined
       }
@@ -543,6 +623,10 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
         onArtifactRefine={handleArtifactRefine}
         onPatchCopyToEditor={handlePatchCopyToEditor}
         onPatchRefineAgain={handlePatchRefineAgain}
+        onOpenPublishChecklist={handleOpenPublishChecklist}
+        onCopyMissingItems={handleCopyMissingItems}
+        onOpenPublishWorkspace={handleOpenPublishWorkspace}
+        onOpenConnections={handleOpenConnections}
         onJobSettled={handleJobSettled}
       />
     </CreatorShell>

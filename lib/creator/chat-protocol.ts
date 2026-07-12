@@ -102,6 +102,11 @@ export type NoticeCard = {
   tone: "info" | "warning" | "error" | "success";
   title: string;
   body?: string;
+  /**
+   * 可选实体引用(C8):供客户端把稳定 actionId 映射到应用内路由时取实体 ID,
+   * 例如「打开发布中心」按 content 引用预选内容。客户端不得执行卡内任意地址。
+   */
+  reference?: EntityRef;
   actions?: CardAction[];
 };
 
@@ -142,7 +147,39 @@ export type ChatCard =
   | ArtifactCard
   | ApprovalCard
   | NoticeCard
-  | PatchCard;
+  | PatchCard
+  | PublishReadinessCard;
+
+/**
+ * publish.prepare 发布就绪卡(C8)。
+ * 汇总平台、内容版本、内容检查项与供应商连接的本地状态;
+ * 用户在此卡上显式确认后才移交发布中心,本阶段不接入真实供应商,
+ * 移交只是把内容带到 /publish 工作台,不会自动发布、不伪造发布结果。
+ * items 由服务端从用户所属版本计算;确认时服务端会按 revisionId 重新校验。
+ */
+export type PublishReadinessCard = {
+  id: string;
+  version: 1;
+  type: "publish_readiness";
+  contentId: string;
+  /** 就绪结论基于的版本;确认时若已不是最新版会被安全拦截 */
+  revisionId: string;
+  revisionNumber: number;
+  platform: "xiaohongshu" | "douyin";
+  contentKind: "xhs_graphic" | "douyin_video_script";
+  title: string;
+  /** 内容检查聚合结论 */
+  state: "ready" | "warnings" | "blocked";
+  /** AiToEarn 凭证的本地配置状态;connected 仅代表已配置,不代表真实可用 */
+  connection: "connected" | "missing" | "invalid";
+  items: Array<{
+    key: string;
+    label: string;
+    level: "pass" | "warn" | "block";
+    detail?: string;
+  }>;
+  actions: CardAction[];
+};
 
 export type ChatMessageMetadataV1 = {
   protocol: typeof CHAT_PROTOCOL;

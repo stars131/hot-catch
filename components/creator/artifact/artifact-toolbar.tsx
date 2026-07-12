@@ -21,7 +21,7 @@ const PLATFORM_LABEL = { xiaohongshu: "小红书图文", douyin: "抖音脚本" 
 
 /**
  * Artifact 固定顶栏:保存状态、版本、撤销/重做、评分、导出、准备发布、关闭。
- * 「准备发布」在发布确认批次(C8)接入前保持禁用,不做假成功。
+ * 「准备发布」打开发布就绪清单(C8);真实发布仍在发布中心手动完成。
  */
 export function ArtifactToolbar(props: {
   content: ArtifactContentData;
@@ -40,6 +40,7 @@ export function ArtifactToolbar(props: {
   onRestoreRevision: (revisionId: string) => void;
   onExport: () => void;
   onShowScore: () => void;
+  onPreparePublish: () => void;
   onClose: () => void;
 }) {
   const saveLabel = props.dirty
@@ -167,9 +168,9 @@ export function ArtifactToolbar(props: {
         <Button
           size="sm"
           variant="ghost"
-          className="h-7 rounded-lg px-2 text-[11px] text-[#9C968C]"
-          disabled
-          title="发布确认流程将在后续批次接入,当前不可用"
+          className="h-7 rounded-lg px-2 text-[11px] text-[#67625A]"
+          onClick={props.onPreparePublish}
+          data-testid="artifact-prepare-publish"
         >
           <Send className="h-3.5 w-3.5" /> 准备发布
         </Button>

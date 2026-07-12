@@ -232,6 +232,98 @@ describe("star-skill/v1 schema", () => {
   });
 });
 
+describe("publish_readiness 卡协议(C8)", () => {
+  const validReadinessCard = {
+    id: "card-publish-ready-abc123",
+    version: 1,
+    type: "publish_readiness",
+    contentId: "content-1",
+    revisionId: "rev-3",
+    revisionNumber: 3,
+    platform: "xiaohongshu",
+    contentKind: "xhs_graphic",
+    title: "AI 面试复盘",
+    state: "warnings",
+    connection: "missing",
+    items: [
+      { key: "title", label: "标题", level: "pass", detail: "标题已填写(9 字)。" },
+      { key: "tags", label: "话题标签", level: "warn", detail: "建议添加 3–6 个。" },
+    ],
+    actions: [
+      {
+        actionId: "publish.confirm_handoff",
+        label: "确认并移交发布中心",
+        appearance: "primary",
+        requiresConfirmation: true,
+      },
+      { actionId: "connection.open", label: "打开连接设置", repeatable: true },
+    ],
+  };
+
+  it("合法就绪卡通过校验", () => {
+    expect(chatCardSchema.safeParse(validReadinessCard).success).toBe(true);
+  });
+
+  it("拒绝未知状态、越界 items 与未声明字段", () => {
+    expect(
+      chatCardSchema.safeParse({ ...validReadinessCard, state: "published" }).success,
+    ).toBe(false);
+    expect(
+      chatCardSchema.safeParse({ ...validReadinessCard, connection: "oauth" }).success,
+    ).toBe(false);
+    expect(
+      chatCardSchema.safeParse({
+        ...validReadinessCard,
+        items: [{ key: "x", label: "X", level: "fatal" }],
+      }).success,
+    ).toBe(false);
+    expect(
+      chatCardSchema.safeParse({
+        ...validReadinessCard,
+        publishUrl: "https://evil.example/publish",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("notice 卡允许可选实体引用,拒绝任意引用形状", () => {
+    const notice = {
+      id: "notice-handoff-ok-1",
+      version: 1,
+      type: "notice",
+      tone: "success",
+      title: "已移交发布中心(待你手动发布)",
+      reference: { type: "content", id: "content-1" },
+      actions: [
+        { actionId: "publish.open_workspace", label: "打开发布中心", repeatable: true },
+      ],
+    };
+    expect(chatCardSchema.safeParse(notice).success).toBe(true);
+    expect(
+      chatCardSchema.safeParse({
+        ...notice,
+        reference: { type: "url", id: "https://evil.example" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("publishTarget 上下文只允许内容 ID", () => {
+    const request = {
+      clientMessageId: "cm-1",
+      parts: [{ type: "text", text: "准备发布《AI 面试复盘》" }],
+      context: { publishTarget: { contentId: "content-1" } },
+    };
+    expect(sendMessageRequestSchema.safeParse(request).success).toBe(true);
+    expect(
+      sendMessageRequestSchema.safeParse({
+        ...request,
+        context: {
+          publishTarget: { contentId: "content-1", accountId: "acc-1" },
+        },
+      }).success,
+    ).toBe(false);
+  });
+});
+
 describe("patch 卡协议(C7)", () => {
   const validPatchCard = {
     id: "card-patch-abc123",

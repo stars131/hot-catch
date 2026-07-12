@@ -53,6 +53,7 @@ export async function POST(
       text,
       clientMessageId: input.clientMessageId,
       patchTarget: input.context?.patchTarget,
+      publishTarget: input.context?.publishTarget,
     });
     return ok(
       {

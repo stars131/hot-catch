@@ -1,7 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import type { ArtifactCard, ChatCard, PatchCard } from "@/lib/creator/chat-protocol";
+import type {
+  ArtifactCard,
+  ChatCard,
+  NoticeCard,
+  PatchCard,
+  PublishReadinessCard,
+} from "@/lib/creator/chat-protocol";
 import { actionKeyOf } from "@/lib/creator/conversation-client";
 import { OptionCardView } from "@/components/creator/cards/option-card";
 import { NoticeCardView } from "@/components/creator/cards/notice-card";
@@ -10,6 +16,7 @@ import { ApprovalCardView } from "@/components/creator/cards/approval-card";
 import { ReferenceCardView } from "@/components/creator/cards/reference-card";
 import { ArtifactCardView } from "@/components/creator/cards/artifact-card";
 import { PatchCardView } from "@/components/creator/cards/patch-card";
+import { PublishReadinessCardView } from "@/components/creator/cards/publish-readiness-card";
 
 export type CardInvokeState = {
   phase: "idle" | "loading" | "success" | "failed";
@@ -49,6 +56,14 @@ export function CardRenderer(props: {
   onPatchCopyToEditor?: (card: PatchCard) => void;
   /** 补丁卡「再改一次」的本地处理(带区块上下文预填输入框),不回传服务端 */
   onPatchRefineAgain?: (card: PatchCard) => void;
+  /** 就绪卡「打开检查清单」的本地处理(打开 Artifact 清单),不回传服务端 */
+  onOpenPublishChecklist?: (card: PublishReadinessCard) => void;
+  /** 就绪卡「复制待处理项」的本地处理(预填输入框),不回传服务端 */
+  onCopyMissingItems?: (card: PublishReadinessCard) => void;
+  /** 「打开发布中心」的本地处理(应用内跳转 /publish),不回传服务端 */
+  onOpenPublishWorkspace?: (contentId: string | null) => void;
+  /** 「打开连接设置」的本地处理(应用内跳转 /settings/connections),不回传服务端 */
+  onOpenConnections?: () => void;
   /** 进度卡对应任务进入终态时通知(用于刷新消息流,接收成果卡) */
   onJobSettled?: () => void;
 }) {
@@ -93,7 +108,22 @@ export function CardRenderer(props: {
           card={props.card}
           state={state}
           processedActionIds={processed}
-          onInvoke={(actionId) => void invoke(actionId)}
+          onInvoke={(actionId) => {
+            // 应用内导航动作由客户端本地处理:只依据稳定 actionId 映射固定路由,
+            // 实体 ID 取自服务端写入的卡片引用,不执行卡内任意地址
+            const notice = props.card as NoticeCard;
+            if (actionId === "publish.open_workspace" && props.onOpenPublishWorkspace) {
+              props.onOpenPublishWorkspace(
+                notice.reference?.type === "content" ? notice.reference.id : null,
+              );
+              return;
+            }
+            if (actionId === "connection.open" && props.onOpenConnections) {
+              props.onOpenConnections();
+              return;
+            }
+            void invoke(actionId);
+          }}
         />
       );
     case "progress":
@@ -135,6 +165,18 @@ export function CardRenderer(props: {
           state={state}
           processedActionIds={processed}
           onInvoke={(actionId) => void invoke(actionId)}
+        />
+      );
+    case "publish_readiness":
+      return (
+        <PublishReadinessCardView
+          card={props.card}
+          state={state}
+          processedActionIds={processed}
+          onInvoke={(actionId) => void invoke(actionId)}
+          onOpenChecklist={props.onOpenPublishChecklist}
+          onCopyMissing={props.onCopyMissingItems}
+          onOpenConnections={props.onOpenConnections}
         />
       );
     default:

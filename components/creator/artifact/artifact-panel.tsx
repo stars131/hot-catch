@@ -19,6 +19,7 @@ import { ArtifactToolbar } from "@/components/creator/artifact/artifact-toolbar"
 import { ArtifactContentTab } from "@/components/creator/artifact/artifact-content-tab";
 import { ArtifactStructureTab } from "@/components/creator/artifact/artifact-structure-tab";
 import { ScoreEvidencePanel } from "@/components/creator/artifact/score-evidence-panel";
+import { PublishChecklist } from "@/components/creator/artifact/publish-checklist";
 
 /**
  * 「让星迹修改」请求:指令预填对话输入框;
@@ -54,37 +55,61 @@ export function ArtifactPanel(props: {
   onAskRefine?: (request: ArtifactRefineRequest) => void;
   /** 补丁卡「复制到编辑器」待写入的提案 */
   pendingInsert?: ArtifactPendingInsert | null;
+  /**
+   * 「在对话中发起发布确认」:保存后把 publishTarget 消息交给对话侧,
+   * 由服务端生成就绪卡;返回 false 表示发送失败,清单保持打开。
+   */
+  onPublishPrepare?: (params: { contentId: string; title: string }) => Promise<boolean>;
+  /** 就绪卡「打开检查清单」的打开请求;数值变化时打开一次 */
+  openChecklistNonce?: number;
 }) {
   const artifact = useArtifact(props.contentId);
   const [tab, setTab] = useState<ArtifactEditorTab>("content");
   const [insertNotice, setInsertNotice] = useState<string | null>(null);
+  const [checklistOpen, setChecklistOpen] = useState(false);
+  const [publishSending, setPublishSending] = useState(false);
   const appliedInsertNonceRef = useRef(0);
+  const appliedChecklistNonceRef = useRef(0);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
 
-  // 打开时移入焦点,关闭时还原
+  // 打开时移入焦点,关闭时还原;切换内容时重置清单状态
   useEffect(() => {
     restoreFocusRef.current = document.activeElement as HTMLElement | null;
     rootRef.current
       ?.querySelector<HTMLElement>('[data-testid="artifact-panel-title"]')
       ?.focus();
+    setChecklistOpen(false);
     return () => {
       restoreFocusRef.current?.focus?.();
     };
   }, [props.contentId]);
 
-  // Esc 关闭(输入控件内除外,避免打断输入法/文本编辑)
+  // Esc 作用域:清单打开时先关清单,再次 Esc 才关闭面板(输入控件内除外)
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
       const target = event.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
       if (!rootRef.current?.contains(target)) return;
+      if (checklistOpen) {
+        setChecklistOpen(false);
+        return;
+      }
       props.onClose();
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [props]);
+  }, [props, checklistOpen]);
+
+  // 就绪卡「打开检查清单」请求:nonce 变化时打开一次
+  useEffect(() => {
+    const nonce = props.openChecklistNonce ?? 0;
+    if (nonce > 0 && nonce !== appliedChecklistNonceRef.current) {
+      appliedChecklistNonceRef.current = nonce;
+      setChecklistOpen(true);
+    }
+  }, [props.openChecklistNonce]);
 
   /** 切换标签并滚动高亮目标块;供评分警告定位与结构大纲跳转共用。 */
   const jumpToAnchor = useCallback(
@@ -178,13 +203,42 @@ export function ArtifactPanel(props: {
     URL.revokeObjectURL(url);
   }, [artifact]);
 
+  /**
+   * 清单「在对话中发起发布确认」:先冲刷未保存草稿(就绪卡评估的是已落库版本),
+   * 再把 publishTarget 消息交给对话侧;保存失败时保持清单打开并提示,不带脏数据移交。
+   */
+  const handlePublishConfirm = useCallback(async () => {
+    const content = artifact.content;
+    if (!content || !props.onPublishPrepare || publishSending) return;
+    setPublishSending(true);
+    try {
+      const flushed = await artifact.flushDraft();
+      if (!flushed) {
+        setInsertNotice("草稿保存失败,尚未发起发布确认;请先重试保存。");
+        return;
+      }
+      const sent = await props.onPublishPrepare({
+        contentId: content.id,
+        title:
+          artifact.draft.title ||
+          artifact.viewRevision?.title ||
+          content.title ||
+          "未命名内容",
+      });
+      if (sent) setChecklistOpen(false);
+    } finally {
+      setPublishSending(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [artifact.content, artifact.flushDraft, artifact.draft.title, props.onPublishPrepare, publishSending]);
+
   return (
     <div
       ref={rootRef}
       role="complementary"
       aria-label="成果编辑面板"
       data-testid="artifact-panel"
-      className="flex h-full min-h-0 w-full flex-col bg-[#FFFDF9]"
+      className="relative flex h-full min-h-0 w-full flex-col bg-[#FFFDF9]"
     >
       {artifact.loadState === "loading" ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-sm text-[#746F67]">
@@ -223,8 +277,24 @@ export function ArtifactPanel(props: {
             onRestoreRevision={(id) => void artifact.restoreRevision(id)}
             onExport={() => void handleExport()}
             onShowScore={() => setTab("score")}
+            onPreparePublish={() => setChecklistOpen(true)}
             onClose={props.onClose}
           />
+
+          {checklistOpen ? (
+            <PublishChecklist
+              contentKind={artifact.content.contentKind}
+              platform={artifact.content.platform}
+              draft={artifact.draft}
+              fallbackTags={artifact.content.tags}
+              revisionNumber={artifact.viewRevision?.revisionNumber ?? null}
+              dirty={artifact.dirty}
+              previewing={artifact.previewing}
+              sending={publishSending}
+              onClose={() => setChecklistOpen(false)}
+              onConfirmToConversation={() => void handlePublishConfirm()}
+            />
+          ) : null}
 
           {artifact.previewing && artifact.viewRevision ? (
             <div

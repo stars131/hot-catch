@@ -13,7 +13,11 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { ArtifactCard, PatchCard } from "@/lib/creator/chat-protocol";
+import type {
+  ArtifactCard,
+  PatchCard,
+  PublishReadinessCard,
+} from "@/lib/creator/chat-protocol";
 import type { ActiveRun, ThreadMessage } from "@/lib/creator/conversation-client";
 import {
   CardRenderer,
@@ -54,6 +58,10 @@ export function ConversationThread(props: {
   onArtifactRefine?: (card: ArtifactCard) => void;
   onPatchCopyToEditor?: (card: PatchCard) => void;
   onPatchRefineAgain?: (card: PatchCard) => void;
+  onOpenPublishChecklist?: (card: PublishReadinessCard) => void;
+  onCopyMissingItems?: (card: PublishReadinessCard) => void;
+  onOpenPublishWorkspace?: (contentId: string | null) => void;
+  onOpenConnections?: () => void;
   onJobSettled?: () => void;
 }) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -177,6 +185,10 @@ export function ConversationThread(props: {
                     onArtifactRefine={props.onArtifactRefine}
                     onPatchCopyToEditor={props.onPatchCopyToEditor}
                     onPatchRefineAgain={props.onPatchRefineAgain}
+                    onOpenPublishChecklist={props.onOpenPublishChecklist}
+                    onCopyMissingItems={props.onCopyMissingItems}
+                    onOpenPublishWorkspace={props.onOpenPublishWorkspace}
+                    onOpenConnections={props.onOpenConnections}
                     onJobSettled={props.onJobSettled}
                   />
                 ))}

@@ -239,6 +239,7 @@ async function appendArtifactMessage(params: {
         actions: [
           { actionId: "artifact.open", label: "打开编辑", appearance: "primary", repeatable: true },
           { actionId: "artifact.refine", label: "继续优化", repeatable: true },
+          { actionId: "publish.prepare", label: "准备发布", repeatable: true },
         ],
       },
     ],

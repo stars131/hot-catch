@@ -142,6 +142,7 @@ export const noticeCardSchema = z
     tone: z.enum(["info", "warning", "error", "success"]),
     title: z.string().min(1).max(200),
     body: z.string().max(4000).optional(),
+    reference: entityRefSchema.optional(),
     actions: z.array(cardActionSchema).max(8).optional(),
   })
   .strict();
@@ -178,6 +179,40 @@ export const patchCardSchema = z
   })
   .strict();
 
+/**
+ * publish.prepare 发布就绪卡(C8)。
+ * items 由服务端从用户所属版本计算;connection 只是凭证的本地配置状态。
+ * 确认动作在服务端会按 revisionId 重新校验,不信任卡片自带结论。
+ */
+export const publishReadinessCardSchema = z
+  .object({
+    ...cardBase,
+    type: z.literal("publish_readiness"),
+    contentId: z.string().min(1).max(64),
+    revisionId: z.string().min(1).max(64),
+    revisionNumber: z.number().int().positive(),
+    platform: z.enum(["xiaohongshu", "douyin"]),
+    contentKind: z.enum(["xhs_graphic", "douyin_video_script"]),
+    title: z.string().min(1).max(200),
+    state: z.enum(["ready", "warnings", "blocked"]),
+    connection: z.enum(["connected", "missing", "invalid"]),
+    items: z
+      .array(
+        z
+          .object({
+            key: stableIdSchema,
+            label: z.string().min(1).max(60),
+            level: z.enum(["pass", "warn", "block"]),
+            detail: z.string().max(500).optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(24),
+    actions: z.array(cardActionSchema).min(1).max(8),
+  })
+  .strict();
+
 export const chatCardSchema = z.discriminatedUnion("type", [
   optionCardSchema,
   referenceCardSchema,
@@ -186,6 +221,7 @@ export const chatCardSchema = z.discriminatedUnion("type", [
   approvalCardSchema,
   noticeCardSchema,
   patchCardSchema,
+  publishReadinessCardSchema,
 ]) satisfies z.ZodType<ChatCard>;
 
 export const chatMessageMetadataV1Schema = z
@@ -232,6 +268,18 @@ export const patchTargetSchema = z
 
 export type PatchTarget = z.infer<typeof patchTargetSchema>;
 
+/**
+ * 发布准备目标(C8):Artifact「准备发布」随消息提交内容 ID;
+ * 服务端只信任内容归属校验后的数据库记录,就绪结论完全由服务端计算。
+ */
+export const publishTargetSchema = z
+  .object({
+    contentId: z.string().min(1).max(64),
+  })
+  .strict();
+
+export type PublishTarget = z.infer<typeof publishTargetSchema>;
+
 /** 发送消息请求(C3 API 将使用;此处先固定协议形状)。 */
 export const sendMessageRequestSchema = z
   .object({
@@ -253,6 +301,7 @@ export const sendMessageRequestSchema = z
         personaId: z.string().min(1).max(64).optional(),
         styleProfileId: z.string().min(1).max(64).optional(),
         patchTarget: patchTargetSchema.optional(),
+        publishTarget: publishTargetSchema.optional(),
       })
       .strict()
       .optional(),

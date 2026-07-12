@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarClock, Check, CircleAlert, ExternalLink, FileUp, Loader2, RefreshCw, RotateCcw, Send, X } from "lucide-react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { CalendarClock, Check, CircleAlert, ExternalLink, FileUp, Loader2, PlugZap, RefreshCw, RotateCcw, Send, X } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import { Badge } from "@/components/ui/badge";
@@ -23,8 +25,22 @@ type Signature = { assetId: string; uploadUrl: string; method: "PUT" | "POST"; f
 const FINAL_STATUSES = new Set<RecordStatus>(["published", "failed", "canceled"]);
 
 export default function PublishPage() {
+  return (
+    <Suspense fallback={null}>
+      <PublishWorkspace />
+    </Suspense>
+  );
+}
+
+function PublishWorkspace() {
+  const searchParams = useSearchParams();
+  /** 创作工作台移交上下文:只用于预选与提示,不代表任何已创建的发布记录 */
+  const handoffContentId = searchParams.get("contentId");
+  const fromCreator = searchParams.get("from") === "creator";
+
   const [contents, setContents] = useState<Content[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [accountsUnavailable, setAccountsUnavailable] = useState(false);
   const [records, setRecords] = useState<PublishRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [contentId, setContentId] = useState("");
@@ -35,23 +51,32 @@ export default function PublishPage() {
   const [submitting, setSubmitting] = useState(false);
   const [activeRecordId, setActiveRecordId] = useState<string | null>(null);
   const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [handoffBannerOpen, setHandoffBannerOpen] = useState(true);
+  const [handoffMissing, setHandoffMissing] = useState(false);
   const idempotencyKey = useRef(crypto.randomUUID());
 
   const load = useCallback(async () => {
     try {
+      let accountsFailed = false;
       const [contentData, accountData, recordData] = await Promise.all([
         readApiJson<{ contents: Content[] }>(await fetch("/api/content/list", { cache: "no-store" })),
-        readApiJson<{ accounts: Account[] }>(await fetch("/api/integrations/aitoearn/accounts", { cache: "no-store" })).catch(() => ({ accounts: [] })),
+        readApiJson<{ accounts: Account[] }>(await fetch("/api/integrations/aitoearn/accounts", { cache: "no-store" })).catch(() => { accountsFailed = true; return { accounts: [] as Account[] }; }),
         readApiJson<{ records: PublishRecord[] }>(await fetch("/api/publish/records", { cache: "no-store" })),
       ]);
       const ready = contentData.contents.filter((content) => content._count.revisions > 0);
       setContents(ready);
       setAccounts(accountData.accounts);
+      setAccountsUnavailable(accountsFailed);
       setRecords(recordData.records);
-      setContentId((current) => current || ready[0]?.id || "");
+      // 创作移交的内容优先预选;不存在或没有版本时给出安全提示,不伪造数据
+      const handoffReady = handoffContentId
+        ? ready.some((content) => content.id === handoffContentId)
+        : false;
+      setHandoffMissing(Boolean(handoffContentId) && !handoffReady);
+      setContentId((current) => current || (handoffReady ? handoffContentId! : ready[0]?.id || ""));
     } catch (cause) { toast.error(cause instanceof Error ? cause.message : "发布数据加载失败"); }
     finally { setLoading(false); }
-  }, []);
+  }, [handoffContentId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -133,11 +158,22 @@ export default function PublishPage() {
 
   return (
     <AppShell title="发布中心" description="从已保存版本创建发布记录；素材由浏览器直传 AiToEarn，服务器不转发大文件。" actions={<Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw className="h-4 w-4" />刷新账号</Button>}>
+      {fromCreator && handoffBannerOpen ? (
+        <div className="mb-5 flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4" data-testid="publish-handoff-banner" role="status">
+          <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+          <div className="min-w-0 flex-1 text-sm leading-6 text-emerald-950">
+            <p className="font-medium">来自创作工作台的移交</p>
+            <p className="mt-0.5 text-xs leading-5 text-emerald-800">已为你预选对应内容。请核对内容版本、选择账号并上传素材后手动确认发布；系统不会自动发布。</p>
+            {handoffMissing ? <p className="mt-1 text-xs font-medium text-amber-800" data-testid="publish-handoff-missing">移交的内容不存在、不属于当前账号或还没有已保存版本，已回退到默认列表。</p> : null}
+          </div>
+          <button type="button" className="shrink-0 text-emerald-700 hover:text-emerald-900" aria-label="关闭移交提示" onClick={() => setHandoffBannerOpen(false)}><X className="h-4 w-4" /></button>
+        </div>
+      ) : null}
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
         <Card><CardHeader><CardTitle>新建发布</CardTitle><CardDescription>发布前请确认正文版本、平台账号、素材和时间。重复点击使用同一幂等键，不会重复创建。</CardDescription></CardHeader><CardContent className="space-y-5">
           {loading ? <div className="h-64 animate-pulse rounded-lg bg-muted" /> : !contents.length ? <div className="rounded-lg border border-dashed p-10 text-center"><p className="font-medium">还没有可发布版本</p><p className="mt-1 text-sm text-muted-foreground">先在创作工作台保存至少一个内容版本。</p></div> : <>
             <label><span className="mb-2 block text-sm font-medium">内容版本</span><select className="h-11 w-full rounded-md border bg-background px-3 text-sm" value={contentId} onChange={(event) => setContentId(event.target.value)}>{contents.map((content) => <option key={content.id} value={content.id}>{content.platform === "douyin" ? "抖音" : "小红书"} · {content.title || "未命名"} · {content._count.revisions} 个版本</option>)}</select></label>
-            <label><span className="mb-2 block text-sm font-medium">发布账号</span><select className="h-11 w-full rounded-md border bg-background px-3 text-sm" value={accountId} onChange={(event) => setAccountId(event.target.value)}><option value="">选择账号</option>{matchingAccounts.map((account) => <option key={account.id} value={account.id} disabled={account.status !== "active"}>{account.name}{account.status !== "active" ? "（已过期）" : ""}</option>)}</select>{!matchingAccounts.length ? <p className="mt-2 text-xs text-amber-700">没有可用账号，请先到连接设置完成授权并同步。</p> : null}</label>
+            <label><span className="mb-2 block text-sm font-medium">发布账号</span><select className="h-11 w-full rounded-md border bg-background px-3 text-sm" value={accountId} onChange={(event) => setAccountId(event.target.value)}><option value="">选择账号</option>{matchingAccounts.map((account) => <option key={account.id} value={account.id} disabled={account.status !== "active"}>{account.name}{account.status !== "active" ? "（已过期）" : ""}</option>)}</select>{accountsUnavailable ? <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3" data-testid="publish-connection-required"><PlugZap className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" /><div className="min-w-0 text-xs leading-5 text-amber-900"><p className="font-medium">连接未就绪：无法加载发布账号</p><p className="mt-0.5">尚未配置 AiToEarn 凭证，或凭证已失效。发布需要先完成连接与账号授权，系统不会用模拟账号代替。</p><Button asChild size="sm" variant="outline" className="mt-2"><Link href="/settings/connections">前往连接设置</Link></Button></div></div> : !matchingAccounts.length ? <p className="mt-2 text-xs text-amber-700">没有可用账号，请先到<Link className="underline underline-offset-2" href="/settings/connections">连接设置</Link>完成授权并同步。</p> : null}</label>
             <div><span className="mb-2 block text-sm font-medium">发布素材</span><label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed bg-muted/20 px-4 text-center hover:bg-muted/40"><FileUp className="h-5 w-5 text-muted-foreground" /><span className="mt-2 text-sm font-medium">{selectedContent?.platform === "douyin" ? "选择一个成片视频" : "选择一张或多张图片"}</span><span className="mt-1 text-xs text-muted-foreground">选择后直接上传到供应商签名地址</span><input className="sr-only" type="file" accept={selectedContent?.platform === "douyin" ? "video/*" : "image/*"} multiple={selectedContent?.platform === "xiaohongshu"} onChange={(event) => { Array.from(event.target.files ?? []).forEach((file) => void uploadFile(file)); event.target.value = ""; }} /></label>{uploadProgress != null ? <div className="mt-3"><Progress value={uploadProgress} className="h-2" /><p className="mt-1 text-right font-mono text-xs text-muted-foreground">{uploadProgress}%</p></div> : null}<div className="mt-3 space-y-2">{uploads.map((upload, index) => <div key={`${upload.url}-${index}`} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm"><span className="min-w-0 truncate">{upload.name} · {(upload.size / 1024 / 1024).toFixed(1)} MB</span><Button variant="ghost" size="icon" onClick={() => setUploads((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X className="h-4 w-4" /></Button></div>)}</div></div>
             <label><span className="mb-2 block text-sm font-medium">发布时间（可选）</span><Input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} min={new Date(Date.now() + 5 * 60_000).toISOString().slice(0, 16)} /></label>
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">提交后供应商超时会先查询既有记录，不会盲目再次发布。抖音进入“等待用户确认”时，请使用短链唤起抖音完成最后一步。</div>

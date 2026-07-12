@@ -7,6 +7,7 @@ import {
   chatMessageMetadataV1Schema,
   parseChatMessageMetadata,
   type PatchTarget,
+  type PublishTarget,
 } from "@/lib/creator/chat-schemas";
 import { getActionHandler, type ActionResult } from "@/lib/creator/action-registry";
 import { detectUrlsInText, type DetectedUrl } from "@/lib/creator/url-detection";
@@ -20,6 +21,7 @@ import {
   getSkillManifest,
   matchSkillByInstruction,
 } from "@/lib/creator/skill-registry";
+import { buildPublishReadinessReply } from "@/lib/creator/publish-handoff";
 import { assertUrlSafe } from "@/lib/security/url-guard";
 import { enqueueJob } from "@/lib/jobs/queues";
 
@@ -276,6 +278,41 @@ async function buildPatchReply(params: {
   };
 }
 
+/**
+ * C8 纯文本发布意图(chat-first):短消息里明确提出发布准备时,
+ * 对当前会话最近更新的内容项目发起就绪检查;没有内容时给出指引。
+ * 刻意收紧匹配(排除「发布会」),避免劫持普通创作消息。
+ */
+const PUBLISH_INTENT_PATTERN = /(准备|确认|开始|发起|移交)发布(?!会)|发布(准备|检查|就绪)/;
+
+export function isPublishIntent(text: string): boolean {
+  return text.length <= 60 && PUBLISH_INTENT_PATTERN.test(text);
+}
+
+/** 纯文本发布意图:解析会话内最近的内容项目再走就绪检查。 */
+async function buildPublishIntentReply(params: {
+  userId: string;
+  conversationId: string;
+  runId: string;
+}): Promise<AgentReply> {
+  const content = await prisma.generatedContent.findFirst({
+    where: { userId: params.userId, conversationId: params.conversationId },
+    orderBy: { updatedAt: "desc" },
+    select: { id: true },
+  });
+  if (!content) {
+    return {
+      text: "这个会话还没有可发布的正式内容。先生成或保存一版内容,再从成果卡或右侧编辑器的「准备发布」发起;也可以直接描述你想创作的内容。",
+      cards: [],
+    };
+  }
+  return buildPublishReadinessReply({
+    userId: params.userId,
+    contentId: content.id,
+    cardIdSuffix: params.runId.slice(-12),
+  });
+}
+
 export async function requireConversation(userId: string, conversationId: string) {
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, userId },
@@ -321,6 +358,7 @@ export async function handleUserMessage(params: {
   text: string;
   clientMessageId: string;
   patchTarget?: PatchTarget;
+  publishTarget?: PublishTarget;
   replyBuilder?: ReplyBuilder;
 }) {
   await requireConversation(params.userId, params.conversationId);
@@ -388,6 +426,12 @@ export async function handleUserMessage(params: {
             text: params.text,
             patchTarget: params.patchTarget,
           })
+        : !params.replyBuilder && params.publishTarget
+        ? await buildPublishReadinessReply({
+            userId: params.userId,
+            contentId: params.publishTarget.contentId,
+            cardIdSuffix: created.run.id.slice(-12),
+          })
         : !params.replyBuilder && (urlScan.detected.length || urlScan.invalid.length)
         ? await buildImportReply({
             userId: params.userId,
@@ -395,12 +439,20 @@ export async function handleUserMessage(params: {
             conversationId: params.conversationId,
             text: params.text,
           })
+        : !params.replyBuilder && isPublishIntent(params.text)
+        ? await buildPublishIntentReply({
+            userId: params.userId,
+            conversationId: params.conversationId,
+            runId: created.run.id,
+          })
         : await builder({
             userId: params.userId,
             conversationId: params.conversationId,
             text: params.text,
           });
     const metadata = buildMetadata(reply.cards, created.run.id);
+    // 就绪检查等分支会声明真实命令(如 publish.prepare),落到 AgentRun 便于追溯
+    const replyCommand = (reply as { command?: string }).command;
     const [assistantMessage, run] = await prisma.$transaction([
       prisma.message.update({
         where: { id: created.assistantMessage.id },
@@ -412,6 +464,7 @@ export async function handleUserMessage(params: {
           status: "completed",
           completedAt: new Date(),
           output: { cardCount: reply.cards.length },
+          ...(replyCommand ? { command: replyCommand } : {}),
         },
       }),
     ]);

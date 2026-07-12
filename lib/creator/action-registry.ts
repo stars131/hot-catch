@@ -12,6 +12,11 @@ import {
 import { applyRevisionSectionPatch } from "@/lib/creator/patch-protocol";
 import { buildManualRevisionPayload } from "@/lib/content/markdown";
 import { createContentRevision } from "@/lib/services/content-project-service";
+import {
+  buildPublishReadinessReply,
+  confirmPublishHandoff,
+} from "@/lib/creator/publish-handoff";
+import { missingItemsPrompt } from "@/lib/creator/publish-readiness";
 import { assertUrlSafe } from "@/lib/security/url-guard";
 import { createHash } from "node:crypto";
 
@@ -478,6 +483,7 @@ export const ACTION_REGISTRY: Record<string, ActionHandler> = {
             actions: [
               { actionId: "artifact.open", label: "打开编辑", appearance: "primary", repeatable: true },
               { actionId: "artifact.refine", label: "继续优化", repeatable: true },
+              { actionId: "publish.prepare", label: "准备发布", repeatable: true },
             ],
           },
         ],
@@ -497,6 +503,86 @@ export const ACTION_REGISTRY: Record<string, ActionHandler> = {
         text: `已忽略「${context.card.sectionLabel}」的修改提案,内容没有任何变化。`,
       };
     },
+  },
+
+  /**
+   * 成果卡/就绪卡:发起或重新发起发布就绪检查(C8)。
+   * 只读评估最新已保存版本,产出新的就绪卡;不创建发布记录、不调用供应商。
+   */
+  "publish.prepare": {
+    repeatable: true,
+    execute: async (context) => {
+      if (context.card.type !== "artifact" && context.card.type !== "publish_readiness") {
+        throw new AppError("VALIDATION_ERROR", "该动作只能由成果卡或发布就绪卡触发。", 400);
+      }
+      return buildPublishReadinessReply({
+        userId: context.userId,
+        contentId: context.card.contentId,
+        cardIdSuffix: `${context.sourceMessageId.slice(-8)}-${Date.now().toString(36)}`,
+      });
+    },
+  },
+
+  /**
+   * 就绪卡:用户显式确认移交发布中心(C8)。
+   * 非重复动作:同一张卡重复确认由幂等键兜底,只执行一次、返回首次结果。
+   * 服务端重新校验归属、版本新旧与阻塞项;不创建发布记录、不调用供应商。
+   */
+  "publish.confirm_handoff": {
+    repeatable: false,
+    execute: async (context) => {
+      if (context.card.type !== "publish_readiness") {
+        throw new AppError("VALIDATION_ERROR", "该动作只能由发布就绪卡触发。", 400);
+      }
+      return confirmPublishHandoff({
+        userId: context.userId,
+        card: context.card,
+        sourceMessageId: context.sourceMessageId,
+      });
+    },
+  },
+
+  /** 就绪卡:打开检查清单(客户端本地打开 Artifact 清单;此处是 API 直连时的兜底说明)。 */
+  "publish.open_checklist": {
+    repeatable: true,
+    execute: (context) => {
+      if (context.card.type !== "publish_readiness") {
+        throw new AppError("VALIDATION_ERROR", "该动作只能由发布就绪卡触发。", 400);
+      }
+      return {
+        text: `「${context.card.title}」的逐项检查清单在创作页右侧编辑器中:点击就绪卡上的「打开检查清单」即可查看阻塞、提醒与已通过项。`,
+      };
+    },
+  },
+
+  /** 就绪卡:把待处理项转成修改指令(客户端本地预填输入框;此处是 API 直连时的兜底)。 */
+  "publish.copy_missing": {
+    repeatable: true,
+    execute: (context) => {
+      if (context.card.type !== "publish_readiness") {
+        throw new AppError("VALIDATION_ERROR", "该动作只能由发布就绪卡触发。", 400);
+      }
+      const prompt = missingItemsPrompt(context.card.items);
+      return {
+        text: prompt || "当前没有待处理项,可以直接确认移交发布中心。",
+      };
+    },
+  },
+
+  /** 结果卡:打开发布中心(客户端本地跳转 /publish;此处是 API 直连时的兜底说明)。 */
+  "publish.open_workspace": {
+    repeatable: true,
+    execute: () => ({
+      text: "请在左侧导航打开「发布」进入发布中心:核对内容版本、选择账号、上传素材后手动确认发布;系统不会自动发布。",
+    }),
+  },
+
+  /** 连接引导:打开连接设置(客户端本地跳转 /settings/connections;此处是兜底说明)。 */
+  "connection.open": {
+    repeatable: true,
+    execute: () => ({
+      text: "请在「设置 → 连接」中配置 AiToEarn 凭证并完成账号授权;配置完成后回到就绪卡点「重新检查」。",
+    }),
   },
 
   /** 参考卡:重新导入(可重复;每次动作各自幂等) */
