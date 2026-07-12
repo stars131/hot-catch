@@ -109,6 +109,8 @@ export type AssetUploadSignature = {
   fields?: Record<string, string>;
   assetUrl?: string;
   expiresAt?: Date;
+  /** true = 模拟签名（mock 模式）：客户端必须跳过真实直传，不得向 uploadUrl 发送文件。 */
+  simulated?: boolean;
 };
 
 export type PublishFlowInput = {

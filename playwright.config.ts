@@ -26,6 +26,8 @@ export default defineConfig({
       DEV_AUTH_BYPASS: "1",
       NODE_ENV: "development",
       URL_GUARD_ALLOWLIST: "127.0.0.1",
+      // e2e 固定走本地模拟发布：绝不调用真实 AiToEarn，即使本机存在真实凭证
+      PUBLISH_PROVIDER_MODE: "mock",
     },
   },
 });

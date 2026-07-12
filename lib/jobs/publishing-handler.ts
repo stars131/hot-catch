@@ -4,7 +4,7 @@ import type { JobHandler } from "@/lib/jobs/types";
 import { prisma } from "@/lib/prisma";
 import {
   applyProviderRecord,
-  getAiToEarnProvider,
+  resolvePublishingProvider,
 } from "@/lib/services/publishing-service";
 import {
   ensureRetrospective,
@@ -21,9 +21,13 @@ const publishingHandler: JobHandler = async (payload, reportProgress) => {
 
   let provider;
   try {
-    provider = await getAiToEarnProvider(payload.userId);
+    // 统一走解析层：mock 模式下 worker 同样只会拿到本地模拟供应商
+    ({ provider } = await resolvePublishingProvider(payload.userId));
   } catch (error) {
-    if (isAppError(error) && error.code === "CREDENTIAL_NOT_CONFIGURED") {
+    if (
+      isAppError(error) &&
+      ["CREDENTIAL_NOT_CONFIGURED", "CREDENTIAL_INVALID"].includes(error.code)
+    ) {
       return {
         finalStatus: "waiting_input",
         resultType: "publishRecord",
@@ -36,8 +40,11 @@ const publishingHandler: JobHandler = async (payload, reportProgress) => {
 
   await reportProgress(25, "提交发布任务");
   let remote;
+  // 只有真正的提交/重试计入 attemptCount；纯查询同步不计
+  let countAttempt = false;
   if (input.mode === "retry" && local.providerRecordId) {
     remote = await provider.retry(local.providerRecordId);
+    countAttempt = true;
   } else if (local.providerRecordId) {
     remote = await provider.getRecord(local.providerRecordId);
   } else {
@@ -48,9 +55,10 @@ const publishingHandler: JobHandler = async (payload, reportProgress) => {
       scheduledAt: local.scheduledAt ?? undefined,
       payload: local.requestPayload as Record<string, unknown>,
     });
+    countAttempt = true;
   }
   await reportProgress(80, remote.status === "awaiting_user" ? "等待用户在抖音确认" : "同步发布状态");
-  await applyProviderRecord(local.id, remote);
+  await applyProviderRecord(local.id, remote, { countAttempt });
   if (remote.status === "published") {
     const publishedAt = local.publishedAt ?? new Date();
     await ensureRetrospective(payload.userId, local.id);

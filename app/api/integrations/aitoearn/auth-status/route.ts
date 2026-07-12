@@ -1,6 +1,6 @@
 import { requireUser } from "@/lib/auth";
 import { fail, ok } from "@/lib/http";
-import { getAiToEarnProvider } from "@/lib/services/publishing-service";
+import { resolvePublishingProvider } from "@/lib/services/publishing-service";
 import { aitoearnAuthStatusSchema } from "@/lib/validators/publishing";
 
 export const runtime = "nodejs";
@@ -13,7 +13,7 @@ export async function GET(request: Request) {
       platform: url.searchParams.get("platform"),
       sessionId: url.searchParams.get("sessionId"),
     });
-    const provider = await getAiToEarnProvider(user.id);
+    const { provider } = await resolvePublishingProvider(user.id);
     return ok({ status: await provider.getAuthorizationStatus(input.platform, input.sessionId) });
   } catch (error) {
     return fail(error);

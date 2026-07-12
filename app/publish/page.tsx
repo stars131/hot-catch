@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { CalendarClock, Check, CircleAlert, ExternalLink, FileUp, Loader2, PlugZap, RefreshCw, RotateCcw, Send, X } from "lucide-react";
+import { CalendarClock, Check, CircleAlert, ExternalLink, FileUp, FlaskConical, Loader2, PlugZap, RefreshCw, RotateCcw, Send, X } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +20,7 @@ type Account = { id: string; platform: Platform; name: string; avatarUrl?: strin
 type Upload = { name: string; type: "image" | "video"; url: string; size: number };
 type RecordStatus = "draft" | "scheduled" | "uploading" | "submitted" | "awaiting_user" | "published" | "failed" | "canceled";
 type PublishRecord = { id: string; contentId: string; platform: Platform; status: RecordStatus; providerAccountId: string; scheduledAt: string | null; submittedAt: string | null; publishedAt: string | null; shortLink: string | null; publicUrl: string | null; failureCode: string | null; failureReason: string | null; attemptCount: number; lastSyncedAt: string | null; createdAt: string; content?: { title: string | null } };
-type Signature = { assetId: string; uploadUrl: string; method: "PUT" | "POST"; fields?: Record<string, string>; headers?: Record<string, string>; assetUrl?: string };
+type Signature = { assetId: string; uploadUrl: string; method: "PUT" | "POST"; fields?: Record<string, string>; headers?: Record<string, string>; assetUrl?: string; simulated?: boolean };
 
 const FINAL_STATUSES = new Set<RecordStatus>(["published", "failed", "canceled"]);
 
@@ -43,6 +43,7 @@ function PublishWorkspace() {
   const [accountsUnavailable, setAccountsUnavailable] = useState(false);
   const [connection, setConnection] = useState<"connected" | "invalid" | "not_configured" | null>(null);
   const [records, setRecords] = useState<PublishRecord[]>([]);
+  const [providerMode, setProviderMode] = useState<"mock" | "real" | null>(null);
   const [loading, setLoading] = useState(true);
   const [contentId, setContentId] = useState("");
   const [accountId, setAccountId] = useState("");
@@ -63,7 +64,7 @@ function PublishWorkspace() {
         readApiJson<{ contents: Content[] }>(await fetch("/api/content/list", { cache: "no-store" })),
         readApiJson<{ connection: "connected" | "invalid" | "not_configured" }>(await fetch("/api/integrations/aitoearn/status", { cache: "no-store" })).catch(() => null),
         readApiJson<{ accounts: Account[] }>(await fetch("/api/integrations/aitoearn/accounts", { cache: "no-store" })).catch(() => { accountsFailed = true; return { accounts: [] as Account[] }; }),
-        readApiJson<{ records: PublishRecord[] }>(await fetch("/api/publish/records", { cache: "no-store" })),
+        readApiJson<{ records: PublishRecord[]; providerMode?: "mock" | "real" }>(await fetch("/api/publish/records", { cache: "no-store" })),
       ]);
       const ready = contentData.contents.filter((content) => content._count.revisions > 0);
       setContents(ready);
@@ -71,6 +72,7 @@ function PublishWorkspace() {
       setConnection(statusData?.connection ?? null);
       setAccountsUnavailable(accountsFailed);
       setRecords(recordData.records);
+      setProviderMode(recordData.providerMode ?? null);
       // 创作移交的内容优先预选;不存在或没有版本时给出安全提示,不伪造数据
       const handoffReady = handoffContentId
         ? ready.some((content) => content.id === handoffContentId)
@@ -116,7 +118,9 @@ function PublishWorkspace() {
     try {
       const signed = await readApiJson<{ upload: Signature }>(await fetch("/api/publish/assets/sign", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fileName: file.name, contentType: file.type, size: file.size }) }));
       setUploadProgress(35);
-      if (signed.upload.method === "POST") {
+      if (signed.upload.simulated) {
+        // 模拟签名：本地状态机验证，绝不向任何地址发送真实文件
+      } else if (signed.upload.method === "POST") {
         const body = new FormData();
         Object.entries(signed.upload.fields ?? {}).forEach(([key, value]) => body.append(key, value));
         body.append("file", file);
@@ -130,7 +134,7 @@ function PublishWorkspace() {
       const confirmed = await readApiJson<{ asset: { assetUrl: string } }>(await fetch("/api/publish/assets/confirm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ assetId: signed.upload.assetId }) }));
       setUploads((current) => [...current, { name: file.name, type: assetType, url: confirmed.asset.assetUrl || signed.upload.assetUrl || "", size: file.size }]);
       setUploadProgress(100);
-      toast.success("素材已直传 AiToEarn");
+      toast.success(signed.upload.simulated ? "模拟素材已登记（未上传任何真实文件）" : "素材已直传 AiToEarn");
     } catch (cause) { toast.error(cause instanceof Error ? cause.message : "上传失败"); }
     finally { window.setTimeout(() => setUploadProgress(null), 600); }
   }
@@ -139,10 +143,11 @@ function PublishWorkspace() {
     if (!selectedContent || !accountId || !uploads.length) return;
     setSubmitting(true);
     try {
-      const data = await readApiJson<{ recordId: string; status: RecordStatus }>(await fetch("/api/publish/flows", { method: "POST", headers: { "content-type": "application/json", "Idempotency-Key": idempotencyKey.current }, body: JSON.stringify({ contentId: selectedContent.id, accountId, ...(scheduledAt ? { scheduledAt: new Date(scheduledAt).toISOString() } : {}), assets: uploads.map(({ url, type }) => ({ url, type })) }) }));
+      const data = await readApiJson<{ recordId: string; status: RecordStatus; record?: PublishRecord; providerMode?: "mock" | "real" }>(await fetch("/api/publish/flows", { method: "POST", headers: { "content-type": "application/json", "Idempotency-Key": idempotencyKey.current }, body: JSON.stringify({ contentId: selectedContent.id, accountId, ...(scheduledAt ? { scheduledAt: new Date(scheduledAt).toISOString() } : {}), assets: uploads.map(({ url, type }) => ({ url, type })) }) }));
       setActiveRecordId(data.recordId);
+      if (data.record) setRecords((current) => [data.record!, ...current.filter((item) => item.id !== data.record!.id)]);
       idempotencyKey.current = crypto.randomUUID();
-      toast.success(scheduledAt ? "定时发布任务已创建" : "发布任务已提交");
+      toast.success(data.providerMode === "mock" ? "模拟发布已进入本地状态机（不会发布到真实平台）" : scheduledAt ? "定时发布任务已创建" : "发布任务已提交");
       await load();
     } catch (cause) { toast.error(cause instanceof Error ? cause.message : "发布提交失败"); }
     finally { setSubmitting(false); }
@@ -161,6 +166,15 @@ function PublishWorkspace() {
 
   return (
     <AppShell title="发布中心" description="从已保存版本创建发布记录；素材由浏览器直传 AiToEarn，服务器不转发大文件。" actions={<Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw className="h-4 w-4" />刷新账号</Button>}>
+      {providerMode === "mock" ? (
+        <div className="mb-5 flex items-start gap-3 rounded-lg border border-sky-200 bg-sky-50 p-4" data-testid="publish-mock-banner" role="status">
+          <FlaskConical className="mt-0.5 h-4 w-4 shrink-0 text-sky-700" />
+          <div className="min-w-0 flex-1 text-sm leading-6 text-sky-950">
+            <p className="font-medium">本地模拟模式</p>
+            <p className="mt-0.5 text-xs leading-5 text-sky-800">发布流程运行在本地状态机与契约夹具上：不会调用真实 AiToEarn，不会上传真实素材，也不会发布到真实平台。真实发布需要在部署环境显式开启。</p>
+          </div>
+        </div>
+      ) : null}
       {fromCreator && handoffBannerOpen ? (
         <div className="mb-5 flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4" data-testid="publish-handoff-banner" role="status">
           <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
@@ -191,7 +205,7 @@ function PublishWorkspace() {
 }
 
 function RecordCard({ record, busy, onRefresh, onRetry, onCancel }: { record: PublishRecord; busy: boolean; onRefresh: () => void; onRetry: () => void; onCancel: () => void }) {
-  return <Card className={cn(record.status === "awaiting_user" && "border-amber-300", record.status === "failed" && "border-red-300")}><CardHeader className="pb-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><CardTitle className="truncate text-base">{record.content?.title || "内容发布"}</CardTitle><CardDescription className="mt-1">{record.platform === "douyin" ? "抖音" : "小红书"} · {new Date(record.createdAt).toLocaleString("zh-CN")}</CardDescription></div><PublishBadge status={record.status} /></div></CardHeader><CardContent className="space-y-3">{record.status === "awaiting_user" ? <div className="rounded-lg border border-amber-200 bg-amber-50 p-3"><p className="text-sm font-medium text-amber-950">还差用户确认</p><p className="mt-1 text-xs leading-5 text-amber-800">请在手机上打开短链并在抖音完成发布确认。</p>{record.shortLink ? <Button className="mt-3 w-full" asChild><a href={record.shortLink} target="_blank" rel="noreferrer">打开抖音确认 <ExternalLink className="h-4 w-4" /></a></Button> : <p className="mt-2 text-xs font-medium text-red-700">供应商暂未返回短链，请刷新状态。</p>}</div> : null}{record.status === "failed" ? <div className="flex gap-2 rounded-lg bg-red-50 p-3 text-xs text-red-900"><CircleAlert className="h-4 w-4 shrink-0" /><span>{record.failureReason || record.failureCode || "发布失败，供应商未返回具体原因。"}</span></div> : null}{record.publicUrl ? <Button variant="outline" className="w-full" asChild><a href={record.publicUrl} target="_blank" rel="noreferrer"><Check className="h-4 w-4" />查看已发布作品</a></Button> : null}<div className="flex gap-2"><Button variant="outline" size="sm" onClick={onRefresh} disabled={busy}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}刷新</Button>{record.status === "failed" ? <Button size="sm" onClick={onRetry} disabled={busy}><RotateCcw className="h-4 w-4" />重试</Button> : null}{!["published", "canceled", "failed"].includes(record.status) ? <Button variant="ghost" size="sm" className="ml-auto text-red-700" onClick={onCancel} disabled={busy}>取消</Button> : null}</div></CardContent></Card>;
+  return <Card data-testid={`publish-record-${record.id}`} className={cn(record.status === "awaiting_user" && "border-amber-300", record.status === "failed" && "border-red-300")}><CardHeader className="pb-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><CardTitle className="truncate text-base">{record.content?.title || "内容发布"}</CardTitle><CardDescription className="mt-1">{record.platform === "douyin" ? "抖音" : "小红书"} · {new Date(record.createdAt).toLocaleString("zh-CN")}</CardDescription></div><PublishBadge status={record.status} /></div></CardHeader><CardContent className="space-y-3">{record.status === "awaiting_user" ? <div className="rounded-lg border border-amber-200 bg-amber-50 p-3"><p className="text-sm font-medium text-amber-950">还差用户确认</p><p className="mt-1 text-xs leading-5 text-amber-800">请在手机上打开短链并在抖音完成发布确认。</p>{record.shortLink ? <Button className="mt-3 w-full" asChild><a href={record.shortLink} target="_blank" rel="noreferrer">打开抖音确认 <ExternalLink className="h-4 w-4" /></a></Button> : <p className="mt-2 text-xs font-medium text-red-700">供应商暂未返回短链，请刷新状态。</p>}</div> : null}{record.status === "failed" ? <div className="flex gap-2 rounded-lg bg-red-50 p-3 text-xs text-red-900"><CircleAlert className="h-4 w-4 shrink-0" /><span>{record.failureReason || record.failureCode || "发布失败，供应商未返回具体原因。"}</span></div> : null}{record.publicUrl ? <Button variant="outline" className="w-full" asChild><a href={record.publicUrl} target="_blank" rel="noreferrer"><Check className="h-4 w-4" />查看已发布作品</a></Button> : null}<div className="flex gap-2"><Button variant="outline" size="sm" onClick={onRefresh} disabled={busy}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}刷新</Button>{record.status === "failed" ? <Button size="sm" onClick={onRetry} disabled={busy}><RotateCcw className="h-4 w-4" />重试</Button> : null}{!["published", "canceled", "failed"].includes(record.status) ? <Button variant="ghost" size="sm" className="ml-auto text-red-700" onClick={onCancel} disabled={busy}>取消</Button> : null}</div></CardContent></Card>;
 }
 
 function PublishBadge({ status }: { status: RecordStatus }) {

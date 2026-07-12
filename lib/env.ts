@@ -25,6 +25,7 @@ const envSchema = z.object({
   MEDIA_TEMP_ROOT: z.string().optional().default(""),
   MEDIA_DOWNLOAD_MAX_MB: z.coerce.number().positive().max(1000).default(500),
   AITO_EARN_BASE_URL: z.string().url().default("https://aitoearn.cn"),
+  PUBLISH_PROVIDER_MODE: z.enum(["mock", "real"]).optional(),
   FIRECRAWL_BASE_URL: z.string().url().default("https://api.firecrawl.dev"),
   PROVIDER_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
   XHS_FETCH_PROVIDER: z.enum(["mock", "third_party", "public_page"]).default("mock"),
@@ -45,4 +46,18 @@ export function isDeepSeekConfigured(): boolean {
 
 export function isDevelopmentAuthBypassEnabled(): boolean {
   return env.NODE_ENV !== "production" && env.DEV_AUTH_BYPASS === "1";
+}
+
+export type PublishProviderMode = "mock" | "real";
+
+/**
+ * 发布供应商执行模式。
+ *
+ * - 生产环境强制 real：绝不允许用 mock 掩盖真实发布错误。
+ * - 开发/测试默认 mock：本地状态机 + 契约夹具，绝不调用真实 AiToEarn；
+ *   只有显式设置 PUBLISH_PROVIDER_MODE=real（未来的手动验收命令）才走真实供应商。
+ */
+export function resolvePublishProviderMode(): PublishProviderMode {
+  if (env.NODE_ENV === "production") return "real";
+  return env.PUBLISH_PROVIDER_MODE ?? "mock";
 }
