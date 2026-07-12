@@ -185,6 +185,31 @@ export class MockAiToEarnProvider implements PublishingProvider {
     return this.snapshot(state);
   }
 
+  /**
+   * C11 夹具指标：确定性伪随机（由 platformWorkId + platform 派生），
+   * 永远带 simulated/source 标记——展示层据此打"模拟数据"标签，
+   * 绝不允许它冒充真实平台表现。
+   */
+  async getWorkAnalytics(platform: Platform, platformWorkId: string) {
+    const seed = fixtureSeed(`${platform}:${platformWorkId}`);
+    const viewCount = 900 + (seed % 2100);
+    return {
+      simulated: true,
+      source: "mock-fixture",
+      provider: this.name,
+      platform,
+      platformWorkId,
+      metrics: {
+        viewCount,
+        likeCount: 40 + (seed % 160),
+        collectCount: 12 + (seed % 48),
+        commentCount: 5 + (seed % 25),
+        shareCount: 3 + (seed % 17),
+        followerDelta: seed % 9,
+      },
+    };
+  }
+
   async getRecord(recordId: string): Promise<ProviderPublishRecord> {
     const state = this.mustGet(recordId);
     state.queryCount += 1;
@@ -256,6 +281,10 @@ export class MockAiToEarnProvider implements PublishingProvider {
         simulated: true,
         provider: this.name,
         idempotencyKey: state.idempotencyKey,
+        // 只有 published（夹具强制态）才暴露平台作品 ID，供指标任务读取
+        ...(state.status === "published"
+          ? { platformWorkId: `mock-work-${state.recordId}` }
+          : {}),
         queryCount: state.queryCount,
         retryCount: state.retryCount,
         createFlowCalls: state.createFlowCalls,
@@ -263,4 +292,13 @@ export class MockAiToEarnProvider implements PublishingProvider {
       },
     };
   }
+}
+
+/** 确定性夹具种子：同一作品 ID 永远得到同一组模拟指标，测试可复现。 */
+function fixtureSeed(input: string) {
+  let hash = 0;
+  for (let index = 0; index < input.length; index += 1) {
+    hash = (hash * 31 + input.charCodeAt(index)) % 100_000;
+  }
+  return hash;
 }

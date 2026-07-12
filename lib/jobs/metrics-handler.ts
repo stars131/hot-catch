@@ -2,8 +2,9 @@ import { MetricWindow, Prisma } from "@prisma/client";
 import { registerJobHandler } from "@/lib/jobs/handlers";
 import type { JobHandler } from "@/lib/jobs/types";
 import { normalizeMetrics } from "@/lib/metrics/normalizer";
+import { computeOutcome, shouldProposeRule } from "@/lib/metrics/retro-math";
 import { prisma } from "@/lib/prisma";
-import { getAiToEarnProvider } from "@/lib/services/publishing-service";
+import { resolvePublishingProvider } from "@/lib/services/publishing-service";
 
 const metricsHandler: JobHandler = async (payload, reportProgress) => {
   const input = payload.input as { publishRecordId?: string; window?: MetricWindow };
@@ -18,17 +19,25 @@ const metricsHandler: JobHandler = async (payload, reportProgress) => {
   if (!record.providerRecordId) throw new Error("发布记录缺少供应商记录 ID。");
 
   await reportProgress(20, "同步作品标识");
-  const provider = await getAiToEarnProvider(payload.userId);
+  // 统一经供应商解析层：mock 模式使用本地模拟供应商，绝不解密凭证、绝不联网
+  const { provider, mode } = await resolvePublishingProvider(payload.userId);
   const remote = await provider.getRecord(record.providerRecordId);
   const raw = asRecord(unwrap(remote.raw));
   const platformWorkId = stringValue(raw.platformWorkId);
   if (!platformWorkId) {
-    throw new Error("AiToEarn 尚未返回平台作品 ID，将按退避策略重试。");
+    throw new Error("供应商尚未返回平台作品 ID，将按退避策略重试。");
   }
   await reportProgress(50, "读取平台指标");
-  const metrics = normalizeMetrics(
-    await provider.getWorkAnalytics(record.platform, platformWorkId),
-  );
+  const analytics = await provider.getWorkAnalytics(record.platform, platformWorkId);
+  const metrics = normalizeMetrics(analytics);
+  const simulated = mode === "mock" || asRecord(analytics).simulated === true;
+  // 数据来源标签必须落库：模拟/夹具指标绝不允许冒充真实平台表现
+  metrics.rawData = {
+    source: simulated ? "mock-fixture" : "provider",
+    simulated,
+    provider: provider.name,
+    payload: metrics.rawData,
+  };
   const snapshot = await prisma.metricSnapshot.upsert({
     where: {
       publishRecordId_window: {
@@ -62,16 +71,10 @@ async function updateD7Retrospective(
   });
   if (!retrospective) return;
   const predicted = asRecord(retrospective.predictedScore);
-  const predictedTotal = numberValue(predicted.total);
-  const engagement =
-    (metrics.likeCount ?? 0) * 2 +
-    (metrics.collectCount ?? 0) * 3 +
-    (metrics.commentCount ?? 0) * 3 +
-    (metrics.shareCount ?? 0) * 4;
-  const views = Math.max(metrics.viewCount ?? 0, 1);
-  const outcomeScore = Math.min(100, Math.round((engagement / views) * 1000));
-  const delta = outcomeScore - predictedTotal;
-  const direction = delta > 10 ? "underestimated" : delta < -10 ? "overestimated" : "aligned";
+  const { predictedTotal, outcomeScore, delta, direction } = computeOutcome(
+    metrics,
+    numberValue(predicted.total),
+  );
 
   const recent = await prisma.retrospective.findMany({
     where: { userId, scoringRubricId: retrospective.scoringRubricId, id: { not: retrospective.id } },
@@ -80,7 +83,7 @@ async function updateD7Retrospective(
     select: { variance: true },
   });
   const directions = [direction, ...recent.map((item) => stringValue(asRecord(item.variance).direction))];
-  const repeated = direction !== "aligned" && directions.length === 3 && directions.every((item) => item === direction);
+  const repeated = shouldProposeRule(directions);
   await prisma.retrospective.update({
     where: { id: retrospective.id },
     data: {

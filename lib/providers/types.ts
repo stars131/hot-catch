@@ -181,6 +181,8 @@ export interface PublishingProvider {
   }): Promise<AssetUploadSignature>;
   confirmAssetUpload(assetId: string): Promise<{ assetId: string; assetUrl: string }>;
   createFlow(input: PublishFlowInput): Promise<ProviderPublishRecord>;
+  /** D+1/D+3/D+7 指标采集入口；mock 实现必须返回带 simulated 标记的夹具数据。 */
+  getWorkAnalytics(platform: Platform, platformWorkId: string): Promise<unknown>;
   getRecord(recordId: string): Promise<ProviderPublishRecord>;
   retry(recordId: string): Promise<ProviderPublishRecord>;
   cancel(recordId: string): Promise<void>;
