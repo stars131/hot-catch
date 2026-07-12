@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { AppError } from "@/lib/errors";
 import type { PersonaInput } from "@/lib/validators/persona";
 import type { Prisma } from "@prisma/client";
 
@@ -39,6 +40,11 @@ export async function upsertPersona(userId: string, input: PersonaInput) {
   }
 
   if (id) {
+    const existing = await prisma.persona.findFirst({
+      where: { id, userId },
+      select: { id: true },
+    });
+    if (!existing) throw new AppError("NOT_FOUND", "人设不存在。", 404);
     return prisma.persona.update({
       where: { id },
       data: data as Prisma.PersonaUpdateInput,

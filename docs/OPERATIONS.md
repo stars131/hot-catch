@@ -1,5 +1,7 @@
 # 星迹内容助手内测运维手册
 
+> 内测就绪检查表、环境变量 mock/real 边界、凭证就绪清单见 `docs/internal-beta.md`（C12）。
+
 ## 首次部署
 
 1. 准备一台已安装 Docker Engine 与 Compose v2 的 Linux 主机，域名 A/AAAA 记录指向该主机，并开放 80、443 TCP/UDP。
@@ -34,6 +36,17 @@ curl --fail https://你的域名/api/health
 ```
 
 健康接口只有在 PostgreSQL 与 Redis 都可用时返回 200。依赖失败时产品会显示明确状态，不会回退到演示数据。
+
+### Worker 存活巡检
+
+BullMQ Worker 没有 HTTP 健康端点，靠 `restart: unless-stopped` 保活，收到 `SIGTERM` 时会关闭全部队列消费者并断开数据库（`worker/index.ts`）。巡检方式：
+
+```bash
+docker compose --env-file deploy/.env.production -f deploy/docker-compose.prod.yml ps worker
+docker compose --env-file deploy/.env.production -f deploy/docker-compose.prod.yml logs --since 30m worker
+```
+
+若发布/导入任务长期停留在 `queued`，优先检查 worker 容器状态与 Redis 连通性，再检查对应用户凭证状态；不要用手工改库的方式“推进”任务状态。
 
 ## 备份与恢复
 
