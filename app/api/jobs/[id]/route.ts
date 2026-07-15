@@ -33,7 +33,7 @@ export async function GET(_request: Request, context: RouteContext) {
       },
     });
     if (!job) throw new AppError("NOT_FOUND", "任务不存在。", 404);
-    const messageKey = jobErrorMessageKey(job.errorCode);
+    const messageKey = jobErrorMessageKey(job.errorCode, job.output);
     return ok({
       job: {
         ...job,

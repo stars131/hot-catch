@@ -374,6 +374,7 @@
     "jobFailed": "The task failed. Retry it when ready.",
     "provider": "The external service is temporarily unavailable.",
     "generationFailed": "The model did not return content that matches the platform format.",
+    "styleProfileRequired": "Approve the style profile before generating content.",
     "scoringNotSupported": "This platform uses a format checklist instead of domestic-platform scoring.",
     "featureDisabled": "This feature is not enabled in the current environment.",
     "rateLimited": "Too many requests. Try again shortly."

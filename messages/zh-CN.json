@@ -374,6 +374,7 @@
     "jobFailed": "任务执行失败，请重试。",
     "provider": "外部服务暂时不可用。",
     "generationFailed": "模型未返回符合平台格式的内容。",
+    "styleProfileRequired": "请先确认风格画像后再生成内容。",
     "scoringNotSupported": "该平台使用格式检查清单，不执行国内平台评分。",
     "featureDisabled": "该功能尚未在当前环境开启。",
     "rateLimited": "请求过于频繁，请稍后重试。"

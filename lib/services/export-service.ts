@@ -67,7 +67,7 @@ export async function createAgentRunExport(params: {
     }
     const revision = content.revisions[0];
     const directory = platformDirectory(platform);
-    const messageKey = jobErrorMessageKey(job.errorCode);
+    const messageKey = jobErrorMessageKey(job.errorCode, job.output);
     manifestItems.push({
       platform,
       contentKind: content.contentKind,

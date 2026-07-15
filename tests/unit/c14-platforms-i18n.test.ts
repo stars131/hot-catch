@@ -182,6 +182,15 @@ describe("C14 URL recognition and UI dictionaries", () => {
     expect(messageKey).toBe("errors.credentialInvalid");
     expect(safeJobErrorMessage(messageKey)).toBe("模型凭证无效或已失效，请更新后重试。");
   });
+
+  it("maps waiting-input reasons to an explicit safe prompt", () => {
+    const messageKey = jobErrorMessageKey(null, {
+      reason: "LLM_CREDENTIAL_REQUIRED",
+      message: "provider details must not be exposed",
+    });
+    expect(messageKey).toBe("errors.credentialRequired");
+    expect(safeJobErrorMessage(messageKey)).toBe("请先配置可用的模型凭证。");
+  });
 });
 
 function flattenKeys(value: unknown, prefix = ""): string[] {

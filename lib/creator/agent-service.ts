@@ -685,6 +685,7 @@ export async function getAgentRunForUser(userId: string, runId: string) {
           resultId: true,
           errorCode: true,
           errorMessage: true,
+          output: true,
           input: true,
         },
       },
@@ -694,7 +695,7 @@ export async function getAgentRunForUser(userId: string, runId: string) {
   return {
     ...run,
     jobs: run.jobs.map((job) => {
-      const messageKey = jobErrorMessageKey(job.errorCode);
+      const messageKey = jobErrorMessageKey(job.errorCode, job.output);
       return {
         ...job,
         errorMessage: safeJobErrorMessage(messageKey),
