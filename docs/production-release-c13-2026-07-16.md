@@ -41,7 +41,7 @@
 - 集成测试：85/85
 - `npm run build`
 - 生产依赖审计：0 个漏洞（官方 npm registry）
-- 服务器 `npm run preflight:prod`：切流前必须 11/11 通过。
+- 服务器 `npm run preflight:prod`：11/11 已通过。
 
 ## DNS 与邮件
 
@@ -49,9 +49,18 @@
 - 切换后：A 记录指向 `12.22.163.133`，保持代理开启和 TTL 自动。
 - Resend 发件域：`mail.wlwl-tools.com`。
 - 邮件 DNS：已添加 DKIM TXT、SPF TXT 和发送用 MX，均为“仅 DNS”；未修改根域现有邮件记录，也未添加可选的根域 DMARC。
-- Resend 状态：DNS 已识别，域名仍处于平台验证流程时不得发送生产登录邮件。
+- Resend 状态：域名已验证；`min-xingji-production` 已按“Sending access + 仅限 mail.wlwl-tools.com”创建。
 - 发件人：`星迹内容助手 <noreply@mail.wlwl-tools.com>`。
-- Resend API Key 只保存于生产环境文件，不进入 Git、日志或本清单。
+- Resend API Key 只保存于生产环境文件，不进入 Git、日志或本清单；生产环境已配置。
+- 管理员邀请：`2952932090@qq.com` 已续期至 2026-08-14，当前为 `pending`。
+
+## 切流与回滚演练
+
+- 已将 Cloudflare A 记录从 `65.49.231.53` 切到 `12.22.163.133`，公网检测返回 Cloudflare 522 后立即恢复旧源站；旧站健康检查恢复正常。
+- 服务器 Nginx 正在 `0.0.0.0:80` 监听，主机内不存在 UFW、nftables 或 iptables INPUT 拦截；外部访问 `12.22.163.133:80` 超时，且失败时 Nginx 没有收到请求，阻断点位于云平台安全组或上游网络。
+- 443 继续由 Xray 监听，未修改其配置。
+- 已增加仅匹配 `creat-mcn.wlwl-tools.com` 的 Cloudflare Origin Rule `creat-mcn-origin-port-80`，将该子域回源端口改写为 80；不影响其他域名。
+- 在上游放通 80 或改用 Cloudflare Tunnel 前，公网 A 记录必须保持 `65.49.231.53`。
 
 ## 回滚与已知限制
 
