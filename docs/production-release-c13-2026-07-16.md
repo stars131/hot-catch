@@ -20,6 +20,17 @@
 - Nginx：`/etc/nginx/sites-available/min-xingji-production`
 - 环境：`/etc/min-xingji/production.env`，必须保持 `root:minxingji 0640`。
 - 预览环境继续使用 `127.0.0.1:3030`，不参与公网流量。
+- 发布目录权限：`0750 minxingji:minxingji`；已确认不存在组/其他用户可写的普通文件或目录（符号链接除外）。
+
+## 状态快照与数据库保护
+
+- root-only 生产快照：`/root/ai-ops/backups/min-xingji-release-baseline-20260715T164755Z`
+- 快照内容：生产环境文件、生产 Web/Worker systemd 单元、Nginx 站点配置、完整 Nginx 配置输出、服务状态和监听端口。
+- PostgreSQL custom-format 备份：`/root/ai-ops/backups/postgres/min_xingji-20260715T164756Z.dump`
+- 校验和：同目录 `.sha256` 文件；备份及校验和权限均为 `0600 root:root`。
+- 恢复演练：已恢复到一次性临时数据库并验证 31 张 public 表、4 条已完成迁移和 1 个用户；临时数据库已删除，无残留。
+- 每日备份：`min-xingji-backup.timer` 已启用，每日 03:15 触发并带最多 15 分钟随机延迟；保留最近 7 天。
+- 备份程序：`/usr/local/sbin/min-xingji-backup`；systemd 单元为 `min-xingji-backup.service` 与 `min-xingji-backup.timer`。
 
 ## 发布门槛
 
@@ -37,6 +48,8 @@
 - 切换前：Cloudflare `creat-mcn.wlwl-tools.com` A 记录指向 `65.49.231.53`。
 - 切换后：A 记录指向 `12.22.163.133`，保持代理开启和 TTL 自动。
 - Resend 发件域：`mail.wlwl-tools.com`。
+- 邮件 DNS：已添加 DKIM TXT、SPF TXT 和发送用 MX，均为“仅 DNS”；未修改根域现有邮件记录，也未添加可选的根域 DMARC。
+- Resend 状态：DNS 已识别，域名仍处于平台验证流程时不得发送生产登录邮件。
 - 发件人：`星迹内容助手 <noreply@mail.wlwl-tools.com>`。
 - Resend API Key 只保存于生产环境文件，不进入 Git、日志或本清单。
 
