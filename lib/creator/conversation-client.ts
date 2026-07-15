@@ -12,6 +12,7 @@ import {
   type PublishTarget,
 } from "@/lib/creator/chat-schemas";
 import type { ChatCard } from "@/lib/creator/chat-protocol";
+import type { SkillCatalogItem } from "@/lib/skills/catalog";
 
 export type MessageStatus = "pending" | "complete" | "failed";
 
@@ -99,29 +100,44 @@ export async function createConversation(title: string): Promise<{ id: string }>
   return { id: data.conversation.id };
 }
 
+export async function listSkills(): Promise<SkillCatalogItem[]> {
+  const data = await readApiJson<{ skills: SkillCatalogItem[] }>(
+    await fetch("/api/settings/skills", { cache: "no-store" }),
+  );
+  return data.skills;
+}
+
 export async function listMessages(conversationId: string): Promise<{
   messages: ThreadMessage[];
   processedActionKeys: string[];
   activeRun: ActiveRun | null;
+  activeSkillIds: string[];
 }> {
   const data = await readApiJson<{
     messages: RawMessage[];
     processedActionKeys: string[];
     activeRun: ActiveRun | null;
+    activeSkillIds: string[];
   }>(await fetch(`/api/conversations/${conversationId}/messages`, { cache: "no-store" }));
   return {
     messages: data.messages.map(toThreadMessage),
     processedActionKeys: data.processedActionKeys,
     activeRun: data.activeRun,
+    activeSkillIds: data.activeSkillIds,
   };
 }
 
 export async function sendMessage(
   conversationId: string,
   text: string,
-  options?: { patchTarget?: PatchTarget; publishTarget?: PublishTarget },
+  options?: {
+    patchTarget?: PatchTarget;
+    publishTarget?: PublishTarget;
+    skillIds?: string[];
+  },
 ): Promise<{ userMessage: ThreadMessage; assistantMessage: ThreadMessage; runId: string | null }> {
   const context = {
+    ...(options?.skillIds !== undefined ? { skillIds: options.skillIds } : {}),
     ...(options?.patchTarget ? { patchTarget: options.patchTarget } : {}),
     ...(options?.publishTarget ? { publishTarget: options.publishTarget } : {}),
   };

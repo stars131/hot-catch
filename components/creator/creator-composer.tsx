@@ -1,10 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Link2, Plus, Puzzle, Send, Upload, X } from "lucide-react";
+import Link from "next/link";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Check,
+  ChevronDown,
+  Link2,
+  Plus,
+  Puzzle,
+  Send,
+  Settings,
+  Upload,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { listSkillMenuItems, type SkillMenuItem } from "@/lib/creator/skill-registry";
+import type { SkillCatalogItem } from "@/lib/skills/catalog";
 
 export type ComposerContextChip = {
   id: string;
@@ -19,12 +30,15 @@ export function CreatorComposer(props: {
   value: string;
   busy: boolean;
   chips: ComposerContextChip[];
+  skills: SkillCatalogItem[];
+  selectedSkillIds: string[];
   onChange: (value: string) => void;
   onSend: () => void;
   onRemoveChip: (id: string) => void;
   onSwitchPlatform: (platform: "xiaohongshu" | "douyin") => void;
   /** 从技能菜单选择内置 Skill(star-skill/v1 manifest 驱动) */
-  onPickSkill?: (skill: SkillMenuItem) => void;
+  onPickSkill?: (skill: SkillCatalogItem) => void;
+  onToggleSkill: (skillId: string) => void;
 }) {
   const [plusOpen, setPlusOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
@@ -32,6 +46,29 @@ export function CreatorComposer(props: {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const plusButtonRef = useRef<HTMLButtonElement | null>(null);
+  const generationSkills = useMemo(
+    () =>
+      props.skills.filter(
+        (skill) => skill.enabled && skill.scopes.includes("generation"),
+      ),
+    [props.skills],
+  );
+  const patchSkills = useMemo(
+    () =>
+      props.skills.filter(
+        (skill) =>
+          skill.enabled && skill.scopes.includes("patch") && skill.composerTemplate,
+      ),
+    [props.skills],
+  );
+  const selectedSkills = useMemo(
+    () =>
+      props.selectedSkillIds.flatMap((id) => {
+        const skill = props.skills.find((item) => item.id === id);
+        return skill ? [skill] : [];
+      }),
+    [props.selectedSkillIds, props.skills],
+  );
 
   // 自适应高度,约 8 行后内部滚动
   useEffect(() => {
@@ -72,7 +109,7 @@ export function CreatorComposer(props: {
 
   return (
     <div ref={rootRef} className="mx-auto w-full max-w-3xl">
-      {props.chips.length > 0 ? (
+      {props.chips.length > 0 || selectedSkills.length > 0 ? (
         <div className="mb-2 flex flex-wrap gap-1.5" data-testid="composer-chips">
           {props.chips.map((chip) => (
             <span
@@ -88,6 +125,23 @@ export function CreatorComposer(props: {
                 className="rounded p-0.5 text-[#746F67] hover:bg-[#EDE9E0] hover:text-[#1F1D19]"
                 onClick={() => props.onRemoveChip(chip.id)}
                 aria-label={`移除上下文 ${chip.label}`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+          {selectedSkills.map((skill) => (
+            <span
+              key={skill.id}
+              className="inline-flex max-w-full items-center gap-1 rounded-lg border border-[#DDD7CE] bg-[#FFFDF9] py-1 pl-2.5 pr-1 text-xs text-[#1F1D19]"
+              data-testid={`selected-skill-${skill.id}`}
+            >
+              <span className="truncate">Skill：{skill.name}</span>
+              <button
+                type="button"
+                className="rounded p-0.5 text-[#746F67] hover:bg-[#EDE9E0] hover:text-[#1F1D19]"
+                onClick={() => props.onToggleSkill(skill.id)}
+                aria-label={`移除 Skill：${skill.name}`}
               >
                 <X className="h-3 w-3" />
               </button>
@@ -176,7 +230,50 @@ export function CreatorComposer(props: {
                     className="mt-1 max-h-64 space-y-0.5 overflow-y-auto border-t border-[#EDE9E0] pt-1"
                     data-testid="composer-skill-list"
                   >
-                    {listSkillMenuItems().map((skill) => (
+                    <p className="px-2.5 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-[#746F67]">
+                      本次创作使用（可多选）
+                    </p>
+                    {generationSkills.map((skill) => {
+                      const selected = props.selectedSkillIds.includes(skill.id);
+                      return (
+                        <button
+                          key={`generation-${skill.id}`}
+                          type="button"
+                          className="flex w-full items-start gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-[#EDE9E0]"
+                          aria-pressed={selected}
+                          data-testid={`composer-creation-skill-${skill.id}`}
+                          onClick={() => props.onToggleSkill(skill.id)}
+                        >
+                          <span
+                            className={cn(
+                              "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border",
+                              selected
+                                ? "border-[#C83B32] bg-[#C83B32] text-white"
+                                : "border-[#C9C2B8]",
+                            )}
+                          >
+                            {selected ? <Check className="size-3" /> : null}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block text-sm text-[#1F1D19]">{skill.name}</span>
+                            <span className="mt-0.5 block text-[11px] leading-4 text-[#746F67]">
+                              {skill.description}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                    {!generationSkills.length ? (
+                      <p className="px-2.5 py-2 text-xs text-[#746F67]">
+                        没有已启用的创作 Skill。
+                      </p>
+                    ) : null}
+
+                    <div className="my-1 border-t border-[#EDE9E0]" />
+                    <p className="px-2.5 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-[#746F67]">
+                      修改选中区块
+                    </p>
+                    {patchSkills.map((skill) => (
                       <button
                         key={skill.id}
                         type="button"
@@ -194,9 +291,12 @@ export function CreatorComposer(props: {
                         </span>
                       </button>
                     ))}
-                    <p className="px-2.5 py-1.5 text-[10px] leading-4 text-[#9C968C]">
-                      先在作品编辑器里点「让星迹修改」选中区块,技能会生成可确认的修改提案。
-                    </p>
+                    <Link
+                      href="/settings/skills"
+                      className="mt-1 flex items-center gap-2 border-t border-[#EDE9E0] px-2.5 py-2 text-xs text-[#746F67] hover:text-[#1F1D19]"
+                    >
+                      <Settings className="size-3.5" /> 管理 Skill
+                    </Link>
                   </div>
                 ) : null}
               </div>

@@ -1,11 +1,11 @@
 import { prisma } from "@/lib/prisma";
-import { env, isDeepSeekConfigured } from "@/lib/env";
+import { isAppError } from "@/lib/errors";
 import { truncate } from "@/lib/utils";
 import { getAccountsWithNotes } from "@/lib/services/benchmark-service";
 import { getEffectivePersona } from "@/lib/services/persona-service";
-import { generateJson, generateText } from "@/lib/ai/generate";
 import {
   buildContentGenerationPrompt,
+  contentGenerationResultSchema,
   type ContentGenerationResult,
 } from "@/lib/ai/prompts/content-generation";
 import {
@@ -13,6 +13,11 @@ import {
   type OptimizeTarget,
 } from "@/lib/ai/prompts/content-optimization";
 import { PROMPT_VERSION } from "@/lib/constants/prompt-version";
+import { createLlmProvider } from "@/lib/providers/factory";
+import {
+  resolveConversationSkills,
+  skillSnapshotsJson,
+} from "@/lib/services/skill-service";
 import type { ContentStatus } from "@prisma/client";
 
 function buildMarkdownFromStructured(result: ContentGenerationResult): string {
@@ -93,6 +98,7 @@ export async function generateContent(params: {
   benchmarkAccountIds?: string[];
   outputType?: string;
   conversationId?: string | null;
+  skillIds?: string[];
 }): Promise<{
   contentId: string;
   markdown: string;
@@ -102,29 +108,34 @@ export async function generateContent(params: {
   const accounts = params.benchmarkAccountIds?.length
     ? await getAccountsWithNotes(params.userId, params.benchmarkAccountIds)
     : [];
+  const skillSelection = await resolveConversationSkills({
+    userId: params.userId,
+    conversationId: params.conversationId,
+    skillIds: params.skillIds,
+  });
 
   let structured: ContentGenerationResult;
-  if (isDeepSeekConfigured()) {
-    try {
-      structured = await generateJson<ContentGenerationResult>({
-        messages: buildContentGenerationPrompt({
-          inputType: params.inputType,
-          inputText: params.inputText,
-          persona,
-          benchmarkAccounts: accounts,
-        }),
-        promptType: "content_generation",
-        promptVersion: PROMPT_VERSION.CONTENT_GENERATION,
-        userId: params.userId,
-      });
-    } catch {
-      structured = buildLocalContent({
-        inputText: params.inputText,
-        persona,
-        benchmarkAccounts: accounts,
-      });
-    }
-  } else {
+  let modelName = "local-template";
+  try {
+    const provider = await createLlmProvider(params.userId);
+    const messages = buildContentGenerationPrompt({
+      inputType: params.inputType,
+      inputText: params.inputText,
+      persona,
+      benchmarkAccounts: accounts,
+      skillInstruction: skillSelection.promptInstruction,
+    });
+    structured = await provider.generateStructured({
+      system: messages.find((message) => message.role === "system")?.content ?? "",
+      prompt: messages
+        .filter((message) => message.role !== "system")
+        .map((message) => message.content)
+        .join("\n\n"),
+      schema: contentGenerationResultSchema,
+    });
+    modelName = `${provider.name}/${provider.model}`;
+  } catch (error) {
+    if (!isMissingModelConfiguration(error)) throw error;
     structured = buildLocalContent({
       inputText: params.inputText,
       persona,
@@ -142,6 +153,10 @@ export async function generateContent(params: {
       inputType: params.inputType,
       inputText: params.inputText,
       selectedAccountIds: params.benchmarkAccountIds ?? [],
+      selectedSkillIds: skillSelection.ids,
+      skillSnapshots: skillSelection.snapshots.length
+        ? skillSnapshotsJson(skillSelection.snapshots)
+        : undefined,
       outputType: params.outputType ?? "xhs_graphic",
       generatedTitleOptions: structured.titles ?? [],
       coverTextOptions: structured.coverTexts ?? [],
@@ -153,7 +168,7 @@ export async function generateContent(params: {
       riskNotes: structured.riskNotes,
       fullMarkdown: markdown,
       status: "draft",
-      modelName: env.DEEPSEEK_MODEL,
+      modelName,
       promptVersion: PROMPT_VERSION.CONTENT_GENERATION,
     },
   });
@@ -168,23 +183,32 @@ export async function optimizeContent(params: {
   personaId?: string | null;
 }): Promise<string> {
   const persona = await getEffectivePersona(params.userId, params.personaId);
-  if (isDeepSeekConfigured()) {
-    try {
-      return await generateText({
-        messages: buildContentOptimizationPrompt({
-          target: params.target,
-          currentContent: params.currentContent,
-          persona,
-        }),
-        promptType: "content_optimization",
-        promptVersion: PROMPT_VERSION.CONTENT_OPTIMIZATION,
-        userId: params.userId,
-      });
-    } catch {
-      // Fall through to local optimization.
-    }
+  try {
+    const provider = await createLlmProvider(params.userId);
+    const messages = buildContentOptimizationPrompt({
+      target: params.target,
+      currentContent: params.currentContent,
+      persona,
+    });
+    return await provider.generateText({
+      system: messages.find((message) => message.role === "system")?.content ?? "",
+      prompt: messages
+        .filter((message) => message.role !== "system")
+        .map((message) => message.content)
+        .join("\n\n"),
+    });
+  } catch (error) {
+    if (!isMissingModelConfiguration(error)) throw error;
   }
   return `${params.currentContent}\n\n## Local optimization note\nMake the hook more specific, replace generic examples with your lived detail, and end with one clear reader action.`;
+}
+
+function isMissingModelConfiguration(error: unknown) {
+  return (
+    isAppError(error) &&
+    (error.code === "CREDENTIAL_NOT_CONFIGURED" ||
+      error.code === "AI_NOT_CONFIGURED")
+  );
 }
 
 export async function saveGeneratedContent(

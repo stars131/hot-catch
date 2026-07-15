@@ -3,12 +3,15 @@ import { requireUser } from "@/lib/auth";
 import { fail, ok } from "@/lib/http";
 import {
   deleteCredential,
+  getDefaultLlmProvider,
   listCredentialSummaries,
   saveCredential,
+  setDefaultLlmProvider,
 } from "@/lib/services/credential-service";
 import {
   credentialProviderSchema,
   saveCredentialSchema,
+  setDefaultLlmProviderSchema,
 } from "@/lib/validators/credentials";
 
 export const runtime = "nodejs";
@@ -16,7 +19,25 @@ export const runtime = "nodejs";
 export async function GET() {
   try {
     const user = await requireUser();
-    return ok({ credentials: await listCredentialSummaries(user.id) });
+    const [credentials, defaultLlmProvider] = await Promise.all([
+      listCredentialSummaries(user.id),
+      getDefaultLlmProvider(user.id),
+    ]);
+    return ok({ credentials, defaultLlmProvider });
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const user = await requireUser();
+    const input = setDefaultLlmProviderSchema.parse(await request.json());
+    const defaultLlmProvider = await setDefaultLlmProvider(
+      user.id,
+      input.provider,
+    );
+    return ok({ defaultLlmProvider });
   } catch (error) {
     return fail(error);
   }

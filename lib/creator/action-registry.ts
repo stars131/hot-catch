@@ -13,6 +13,10 @@ import { applyRevisionSectionPatch } from "@/lib/creator/patch-protocol";
 import { buildManualRevisionPayload } from "@/lib/content/markdown";
 import { createContentRevision } from "@/lib/services/content-project-service";
 import {
+  resolveConversationSkills,
+  skillSnapshotsJson,
+} from "@/lib/services/skill-service";
+import {
   buildPublishReadinessReply,
   confirmPublishHandoff,
 } from "@/lib/creator/publish-handoff";
@@ -199,6 +203,11 @@ export const ACTION_REGISTRY: Record<string, ActionHandler> = {
         };
       }
 
+      const skillSelection = await resolveConversationSkills({
+        userId: context.userId,
+        conversationId: context.conversationId,
+      });
+
       const content = await prisma.generatedContent.create({
         data: {
           userId: context.userId,
@@ -211,6 +220,10 @@ export const ACTION_REGISTRY: Record<string, ActionHandler> = {
             : "参考结构原创稿",
           inputType: "idea",
           inputText: reference.brief.summary,
+          selectedSkillIds: skillSelection.ids,
+          skillSnapshots: skillSelection.snapshots.length
+            ? skillSnapshotsJson(skillSelection.snapshots)
+            : undefined,
         },
       });
 
@@ -231,7 +244,11 @@ export const ACTION_REGISTRY: Record<string, ActionHandler> = {
         userId: context.userId,
         type: JobType.analysis,
         action: "content.generate",
-        input: { contentId: content.id, conversationId: context.conversationId },
+        input: {
+          contentId: content.id,
+          conversationId: context.conversationId,
+          skillIds: skillSelection.ids,
+        },
         idempotencyKey: generationKey,
       });
 

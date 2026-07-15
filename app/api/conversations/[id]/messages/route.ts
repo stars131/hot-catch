@@ -52,6 +52,7 @@ export async function POST(
       conversationId: id,
       text,
       clientMessageId: input.clientMessageId,
+      skillIds: input.context?.skillIds,
       patchTarget: input.context?.patchTarget,
       publishTarget: input.context?.publishTarget,
     });

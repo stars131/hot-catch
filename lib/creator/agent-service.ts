@@ -1,6 +1,7 @@
 import { Prisma, JobType } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { prisma } from "@/lib/prisma";
+import { resolveSelectedSkills } from "@/lib/services/skill-service";
 import { AppError } from "@/lib/errors";
 import { CHAT_PROTOCOL, type ChatCard, type CardAction } from "@/lib/creator/chat-protocol";
 import {
@@ -218,6 +219,7 @@ async function buildPatchReply(params: {
     patchTarget.skillId && getSkillManifest(patchTarget.skillId)
       ? patchTarget.skillId
       : matchSkillByInstruction(params.text);
+  await resolveSelectedSkills(params.userId, [skillId], "patch");
   const before = resolvePatchScope(sectionText, patchTarget.excerpt);
   const result = executeBuiltinSkill(skillId, {
     instruction: params.text,
@@ -357,15 +359,23 @@ export async function handleUserMessage(params: {
   conversationId: string;
   text: string;
   clientMessageId: string;
+  skillIds?: string[];
   patchTarget?: PatchTarget;
   publishTarget?: PublishTarget;
   replyBuilder?: ReplyBuilder;
 }) {
-  await requireConversation(params.userId, params.conversationId);
+  const conversation = await requireConversation(params.userId, params.conversationId);
 
   // 幂等重放:同一 clientMessageId 返回首次记录,不再次执行
   const replayed = await loadMessageBundle(params.conversationId, params.clientMessageId);
   if (replayed) return { ...replayed, replayed: true };
+
+  const selectedSkillIds = params.skillIds ?? conversation.activeSkillIds;
+  const selectedSkills = await resolveSelectedSkills(
+    params.userId,
+    selectedSkillIds,
+    "generation",
+  );
 
   let created;
   try {
@@ -396,13 +406,20 @@ export async function handleUserMessage(params: {
           assistantMessageId: assistantMessage.id,
           status: "running",
           command: "chat.reply",
-          input: { text: params.text.slice(0, 500) },
+          input: {
+            text: params.text.slice(0, 500),
+            skillIds: selectedSkills.map((skill) => skill.id),
+            skills: selectedSkills,
+          } as Prisma.InputJsonValue,
           startedAt: new Date(),
         },
       });
       await tx.conversation.update({
         where: { id: params.conversationId },
-        data: { updatedAt: new Date() },
+        data: {
+          updatedAt: new Date(),
+          activeSkillIds: selectedSkills.map((skill) => skill.id),
+        },
       });
       return { userMessage, assistantMessage, run };
     });
@@ -491,7 +508,7 @@ export async function listConversationMessages(params: {
   cursor?: string;
   limit?: number;
 }) {
-  await requireConversation(params.userId, params.conversationId);
+  const conversation = await requireConversation(params.userId, params.conversationId);
   const limit = Math.min(Math.max(params.limit ?? 200, 1), 200);
   const messages = await prisma.message.findMany({
     where: { conversationId: params.conversationId },
@@ -516,6 +533,7 @@ export async function listConversationMessages(params: {
     messages,
     processedActionKeys,
     activeRun,
+    activeSkillIds: conversation.activeSkillIds,
     nextCursor: messages.length === limit ? messages[messages.length - 1].id : null,
   };
 }

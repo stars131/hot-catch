@@ -8,8 +8,8 @@ import {
   Pencil,
   Plug,
   Plus,
+  Puzzle,
   Send,
-  Settings,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -139,10 +139,10 @@ export function ConversationSidebar(props: {
           </li>
           <li>
             <Link
-              href="/settings/connections"
+              href="/settings/skills"
               className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-[#746F67] hover:bg-[#EDE9E0] hover:text-[#1F1D19]"
             >
-              <Settings className="h-4 w-4" /> 设置
+              <Puzzle className="h-4 w-4" /> Skill
             </Link>
           </li>
         </ul>

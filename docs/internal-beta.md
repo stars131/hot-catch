@@ -153,6 +153,7 @@ CI 边界承诺：
 
 ## 7. 部署与运行（对照 `docs/OPERATIONS.md`）
 
+- 上传生产环境文件后、启动 Compose 前，先加载同一份环境变量并执行 `npm run preflight:prod`。该命令只输出检查项状态，不回显任何密钥；存在身份旁路、非 HTTPS 地址、弱/缺失密钥、缺失数据库或 Redis、mock 发布模式、缺失 Resend 登录配置时会以非零状态退出。
 - 生产编排：`deploy/docker-compose.prod.yml`（Caddy HTTPS + web + worker + migrate + db + redis + backup），安全响应头齐备（HSTS/nosniff/DENY），敏感值全部来自 `deploy/.env.production`（不入库、不进镜像）。
 - Web 健康：容器级 healthcheck 打 `/api/health`；Caddy 依赖 web healthy 后才启动。
 - **Worker 存活边界（已知限制）**：BullMQ Worker 无 HTTP 健康端点，靠 `restart: unless-stopped` 保活 + `SIGTERM` 优雅退出（`worker/index.ts`）。日常巡检用 `docker compose ps` + `logs worker`；若需更强保障，后续可加队列心跳探针，不在 C12 范围。

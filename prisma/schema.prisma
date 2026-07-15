@@ -70,8 +70,16 @@ enum CredentialProvider {
   qwen_asr
   aitoearn
   deepseek
+  openai
+  grok
   firecrawl
   xiaohongshu_cookie
+}
+
+enum LlmProviderName {
+  deepseek
+  openai
+  grok
 }
 
 enum CredentialStatus {
@@ -161,6 +169,8 @@ model User {
   name               String?
   image              String?
   avatarUrl          String?
+  defaultLlmProvider LlmProviderName?
+  disabledSkillIds   String[]              @default([])
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
   authAccounts       Account[]
@@ -187,6 +197,7 @@ model User {
   retrospectives     Retrospective[]
   agentRuns          AgentRun[]
   contentReferences  ContentReference[]
+  customSkills       UserSkill[]
 }
 
 model Account {
@@ -258,13 +269,27 @@ model ProviderCredential {
   @@index([userId, status])
 }
 
+model UserSkill {
+  id           String   @id @default(cuid())
+  userId       String
+  name         String
+  description  String
+  instructions String
+  enabled      Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, enabled, updatedAt])
+}
+
 model ProcessingJob {
-  id             String    @id @default(cuid())
+  id             String          @id @default(cuid())
   userId         String
   type           JobType
   queueName      String
-  status         JobStatus @default(queued)
-  progress       Int       @default(0)
+  status         JobStatus       @default(queued)
+  progress       Int             @default(0)
   stage          String?
   input          Json
   output         Json?
@@ -274,18 +299,18 @@ model ProcessingJob {
   errorMessage   String?
   providerJobId  String?
   idempotencyKey String?
-  attempts       Int       @default(0)
-  maxAttempts    Int       @default(3)
+  attempts       Int             @default(0)
+  maxAttempts    Int             @default(3)
   action         String?
   agentRunId     String?
   parentJobId    String?
   startedAt      DateTime?
   completedAt    DateTime?
   canceledAt     DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  agentRun       AgentRun? @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agentRun       AgentRun?       @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
   parentJob      ProcessingJob?  @relation("JobChain", fields: [parentJobId], references: [id], onDelete: SetNull)
   childJobs      ProcessingJob[] @relation("JobChain")
 
@@ -538,15 +563,16 @@ model StyleEvidence {
 }
 
 model Conversation {
-  id        String             @id @default(cuid())
-  userId    String
-  title     String?
-  createdAt DateTime           @default(now())
-  updatedAt DateTime           @updatedAt
-  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages  Message[]
-  contents  GeneratedContent[]
-  agentRuns AgentRun[]
+  id             String             @id @default(cuid())
+  userId         String
+  title          String?
+  activeSkillIds String[]           @default([])
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages       Message[]
+  contents       GeneratedContent[]
+  agentRuns      AgentRun[]
 
   @@index([userId])
 }
@@ -582,6 +608,8 @@ model GeneratedContent {
   inputType             InputType?
   inputText             String?
   selectedAccountIds    String[]             @default([])
+  selectedSkillIds      String[]             @default([])
+  skillSnapshots        Json?
   outputType            String               @default("xhs_graphic")
   generatedTitleOptions Json?
   coverTextOptions      Json?

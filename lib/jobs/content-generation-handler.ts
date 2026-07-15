@@ -17,9 +17,17 @@ import {
   REFERENCE_GUARD_INSTRUCTION,
   type ReferenceBrief,
 } from "@/lib/creator/reference-brief";
+import {
+  resolveConversationSkills,
+  skillSnapshotsJson,
+} from "@/lib/services/skill-service";
 
 const contentGenerationHandler: JobHandler = async (payload, reportProgress) => {
-  const input = payload.input as { contentId?: string; conversationId?: string };
+  const input = payload.input as {
+    contentId?: string;
+    conversationId?: string;
+    skillIds?: string[];
+  };
   if (!input.contentId) throw new Error("contentId is required");
   const content = await prisma.generatedContent.findFirst({
     where: { id: input.contentId, userId: payload.userId },
@@ -37,6 +45,12 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
     };
   }
 
+  const skillSelection = await resolveConversationSkills({
+    userId: payload.userId,
+    conversationId: input.conversationId ?? content.conversationId,
+    skillIds: input.skillIds ?? content.selectedSkillIds,
+  });
+
   let provider;
   try {
     provider = await createLlmProvider(payload.userId);
@@ -44,7 +58,7 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
     if (isAppError(error) && error.code === "CREDENTIAL_NOT_CONFIGURED") {
       return {
         finalStatus: "waiting_input",
-        output: { reason: "DEEPSEEK_CREDENTIAL_REQUIRED", message: "请先配置 DeepSeek 凭证。" },
+        output: { reason: "LLM_CREDENTIAL_REQUIRED", message: "请先配置并选择默认模型。" },
       };
     }
     throw error;
@@ -91,7 +105,8 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
       const generated = await provider.generateStructured({
         system:
           "你是小红书图文编辑。根据选题、人设和已审核风格画像生成原创内容,不冒充参考创作者,不照抄证据。只返回符合字段要求的 JSON。" +
-          REFERENCE_GUARD_INSTRUCTION,
+          REFERENCE_GUARD_INSTRUCTION +
+          (skillSelection.promptInstruction ? `\n\n${skillSelection.promptInstruction}` : ""),
         prompt: `${JSON.stringify(context)}\n生成标题候选、封面文案、逐页图文、完整正文、标签、互动收尾和风险说明。`,
         schema: xhsGraphicOutputSchema,
       });
@@ -105,7 +120,15 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
           structuredContent: generated,
           fullMarkdown: toXhsMarkdown(generated),
         },
-        { originJobId: payload.databaseJobId },
+        {
+          originJobId: payload.databaseJobId,
+          provenance: {
+            promptVersion: "content-xhs-v1",
+            provider: provider.name,
+            model: provider.model,
+            skills: skillSelection.snapshots,
+          } as unknown as Prisma.InputJsonValue,
+        },
       );
       await prisma.generatedContent.update({
         where: { id: content.id },
@@ -116,8 +139,12 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
           tags: generated.tags,
           interactionEnding: generated.interactionEnding,
           riskNotes: generated.riskNotes.join("\n"),
-          modelName: "deepseek",
+          modelName: `${provider.name}/${provider.model}`,
           promptVersion: "content-xhs-v1",
+          selectedSkillIds: skillSelection.ids,
+          skillSnapshots: skillSelection.snapshots.length
+            ? skillSnapshotsJson(skillSelection.snapshots)
+            : Prisma.JsonNull,
         },
       });
       await reportProgress(85, "执行发布前评分");
@@ -145,7 +172,8 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
     const generated = await provider.generateStructured({
       system:
         "你是抖音短视频编导。生成精确到秒且连续的分镜脚本,不自动成片,不冒充参考创作者。每镜必须包含口播、画面、字幕、镜头、转场、音乐和风险字段,只返回 JSON。" +
-        REFERENCE_GUARD_INSTRUCTION,
+        REFERENCE_GUARD_INSTRUCTION +
+        (skillSelection.promptInstruction ? `\n\n${skillSelection.promptInstruction}` : ""),
       prompt: `${JSON.stringify(context)}\n生成 10–180 秒的原创短视频脚本，第一镜从 0 秒开始，最后一镜结束时间等于总时长。`,
       schema: douyinVideoScriptOutputSchema,
     });
@@ -159,7 +187,15 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
         structuredContent: generated,
         fullMarkdown: toDouyinMarkdown(generated),
       },
-      { originJobId: payload.databaseJobId },
+      {
+        originJobId: payload.databaseJobId,
+        provenance: {
+          promptVersion: "content-douyin-v1",
+          provider: provider.name,
+          model: provider.model,
+          skills: skillSelection.snapshots,
+        } as unknown as Prisma.InputJsonValue,
+      },
     );
     await prisma.generatedContent.update({
       where: { id: content.id },
@@ -167,8 +203,12 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
         scriptSpec: generated,
         tags: generated.tags,
         riskNotes: generated.riskNotes.join("\n"),
-        modelName: "deepseek",
+        modelName: `${provider.name}/${provider.model}`,
         promptVersion: "content-douyin-v1",
+        selectedSkillIds: skillSelection.ids,
+        skillSnapshots: skillSelection.snapshots.length
+          ? skillSnapshotsJson(skillSelection.snapshots)
+          : Prisma.JsonNull,
       },
     });
     await reportProgress(85, "执行发布前评分");

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { FileText } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { CreatorShell } from "@/components/creator/creator-shell";
 import { ConversationSidebar } from "@/components/creator/conversation-sidebar";
@@ -26,7 +27,7 @@ import type {
   PublishReadinessCard,
 } from "@/lib/creator/chat-protocol";
 import type { PatchTarget } from "@/lib/creator/chat-schemas";
-import type { SkillMenuItem } from "@/lib/creator/skill-registry";
+import type { SkillCatalogItem } from "@/lib/skills/catalog";
 import { missingItemsPrompt } from "@/lib/creator/publish-readiness";
 import {
   actionKeyOf,
@@ -36,6 +37,7 @@ import {
   invokeAction,
   listConversations,
   listMessages,
+  listSkills,
   sendMessage,
   type ActiveRun,
   type ConversationSummary,
@@ -109,6 +111,8 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
   const [composerValue, setComposerValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [chips, setChips] = useState<ComposerContextChip[]>([]);
+  const [skills, setSkills] = useState<SkillCatalogItem[]>([]);
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [artifactContentId, setArtifactContentId] = useState<string | null>(null);
@@ -143,6 +147,14 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
     void refreshList();
   }, [refreshList]);
 
+  useEffect(() => {
+    listSkills()
+      .then(setSkills)
+      .catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : "Skill 列表加载失败"),
+      );
+  }, []);
+
   const reloadMessages = useCallback(
     async (id: string) => {
       const data = await listMessages(id);
@@ -153,6 +165,7 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
       });
       setProcessedKeys(data.processedActionKeys);
       setActiveRun(data.activeRun);
+      setSelectedSkillIds(data.activeSkillIds);
       return data;
     },
     [],
@@ -195,6 +208,7 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
       setMessages([]);
       setProcessedKeys([]);
       setActiveRun(null);
+      setSelectedSkillIds([]);
       setThreadState("empty");
       setThreadError(undefined);
       return;
@@ -297,6 +311,7 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
             }
           : undefined;
         const result = await sendMessage(activeId, text, {
+          skillIds: selectedSkillIds,
           patchTarget: target,
           publishTarget: options?.publishTarget,
         });
@@ -327,7 +342,16 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
         busyRef.current = false;
       }
     },
-    [busy, conversationId, patchTarget, pathname, refreshList, router, searchParams],
+    [
+      busy,
+      conversationId,
+      patchTarget,
+      pathname,
+      refreshList,
+      router,
+      searchParams,
+      selectedSkillIds,
+    ],
   );
 
   async function handleSend() {
@@ -415,11 +439,23 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
   }
 
   /** Composer 技能菜单:预填指令模板;已有修改目标时把 skillId 绑定到该目标。 */
-  function handlePickSkill(skill: SkillMenuItem) {
+  function handlePickSkill(skill: SkillCatalogItem) {
+    if (!skill.composerTemplate) return;
     const sectionLabel = patchTarget?.label ?? "选中的区块";
     setComposerValue(skill.composerTemplate.replace("{section}", sectionLabel));
     setPatchTarget((current) => (current ? { ...current, skillId: skill.id } : current));
     focusComposer();
+  }
+
+  function handleToggleSkill(skillId: string) {
+    setSelectedSkillIds((current) => {
+      if (current.includes(skillId)) return current.filter((id) => id !== skillId);
+      if (current.length >= 8) {
+        toast.error("一次创作最多选择 8 个 Skill");
+        return current;
+      }
+      return [...current, skillId];
+    });
   }
 
   /** 补丁卡「复制到编辑器」:打开对应作品并把提案写入草稿(客户端本地)。 */
@@ -505,6 +541,7 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
 
   function handleStartNew() {
     setComposerValue("");
+    setSelectedSkillIds([]);
     navigate(platform, { contentId });
   }
 
@@ -561,6 +598,8 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
           platform={platform}
           value={composerValue}
           busy={busy}
+          skills={skills}
+          selectedSkillIds={selectedSkillIds}
           chips={
             patchTarget
               ? [...chips, { id: "patch-target", kind: "patch" as const, label: patchTarget.label }]
@@ -569,6 +608,7 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
           onChange={setComposerValue}
           onSend={() => void handleSend()}
           onPickSkill={handlePickSkill}
+          onToggleSkill={handleToggleSkill}
           onRemoveChip={(id) => {
             if (id === "patch-target") {
               setPatchTarget(null);

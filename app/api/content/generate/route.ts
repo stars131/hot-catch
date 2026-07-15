@@ -20,6 +20,7 @@ export async function POST(req: NextRequest) {
       benchmarkAccountIds: input.benchmarkAccountIds,
       outputType: input.outputType,
       conversationId: input.conversationId,
+      skillIds: input.skillIds,
     });
     return ok(result);
   } catch (error) {

@@ -13,6 +13,7 @@ import {
   Flame,
   Lightbulb,
   Menu,
+  Puzzle,
   Rocket,
   Settings,
   SlidersHorizontal,
@@ -28,6 +29,7 @@ const navigation = [
   { href: "/publish", label: "发布中心", shortLabel: "发布", icon: Rocket },
   { href: "/retrospectives", label: "数据复盘", shortLabel: "复盘", icon: BarChart3 },
   { href: "/settings/connections", label: "连接设置", shortLabel: "设置", icon: Settings },
+  { href: "/settings/skills", label: "Skill 设置", shortLabel: "Skill", icon: Puzzle },
 ] as const;
 
 const mobileNavigation = navigation.filter((item) =>

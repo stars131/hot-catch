@@ -51,11 +51,32 @@ function isPrivateIPv6(ip: string): boolean {
   return false;
 }
 
-function isBlockedIp(ip: string): boolean {
+export function isBlockedIp(ip: string): boolean {
   const version = isIP(ip);
   if (version === 4) return isPrivateIPv4(ip);
   if (version === 6) return isPrivateIPv6(ip);
   return true;
+}
+
+/** 主机名(非 IP 字面量)是否指向本地/内网命名空间。 */
+export function isBlockedHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return (
+    BLOCKED_HOSTNAMES.has(host) ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal")
+  );
+}
+
+/** 是否为回环地址(localhost / 127.0.0.0/8 / ::1)。dev 下模型服务地址的唯一例外。 */
+export function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (host === "localhost") return true;
+  const version = isIP(host);
+  if (version === 4) return host.split(".")[0] === "127";
+  if (version === 6) return host === "::1";
+  return false;
 }
 
 /** 校验 URL 可安全访问;返回规范化后的 URL。失败抛 VALIDATION_ERROR。 */

@@ -300,6 +300,12 @@ export const sendMessageRequestSchema = z
         contentId: z.string().min(1).max(64).optional(),
         personaId: z.string().min(1).max(64).optional(),
         styleProfileId: z.string().min(1).max(64).optional(),
+        skillIds: z
+          .array(
+            z.string().regex(/^(?:builtin|custom)\.[a-z0-9._-]{2,80}$/),
+          )
+          .max(8)
+          .optional(),
         patchTarget: patchTargetSchema.optional(),
         publishTarget: publishTargetSchema.optional(),
       })

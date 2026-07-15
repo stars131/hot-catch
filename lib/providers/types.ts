@@ -190,6 +190,7 @@ export interface PublishingProvider {
 
 export interface LlmProvider {
   readonly name: string;
+  readonly model: string;
   generateText(input: {
     system: string;
     prompt: string;

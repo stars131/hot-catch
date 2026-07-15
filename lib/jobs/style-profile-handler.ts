@@ -33,7 +33,7 @@ const styleProfileBuildHandler: JobHandler = async (payload, reportProgress) => 
     if (isAppError(error) && error.code === "CREDENTIAL_NOT_CONFIGURED") {
       return {
         finalStatus: "waiting_input",
-        output: { reason: "DEEPSEEK_CREDENTIAL_REQUIRED", message: "请先配置 DeepSeek 凭证。" },
+        output: { reason: "LLM_CREDENTIAL_REQUIRED", message: "请先配置并选择默认模型。" },
       };
     }
     throw error;
