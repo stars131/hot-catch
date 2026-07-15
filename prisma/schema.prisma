@@ -10,11 +10,21 @@ datasource db {
 enum Platform {
   xiaohongshu
   douyin
+  youtube
+  tiktok
+  instagram
+  x
+  reddit
 }
 
 enum ContentKind {
   xhs_graphic
   douyin_video_script
+  youtube_video_package
+  tiktok_short_video_script
+  instagram_carousel
+  x_thread
+  reddit_post
 }
 
 enum FetchStatus {
@@ -563,16 +573,18 @@ model StyleEvidence {
 }
 
 model Conversation {
-  id             String             @id @default(cuid())
-  userId         String
-  title          String?
-  activeSkillIds String[]           @default([])
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
-  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages       Message[]
-  contents       GeneratedContent[]
-  agentRuns      AgentRun[]
+  id              String             @id @default(cuid())
+  userId          String
+  title           String?
+  activeSkillIds  String[]           @default([])
+  targetPlatforms Platform[]         @default([])
+  targetLocale    String             @default("zh-CN")
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages        Message[]
+  contents        GeneratedContent[]
+  agentRuns       AgentRun[]
 
   @@index([userId])
 }
@@ -604,6 +616,7 @@ model GeneratedContent {
   scoringRubricId       String?
   platform              Platform             @default(xiaohongshu)
   contentKind           ContentKind          @default(xhs_graphic)
+  contentLocale         String               @default("zh-CN")
   title                 String?
   inputType             InputType?
   inputText             String?

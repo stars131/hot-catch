@@ -23,6 +23,14 @@ import {
 import { missingItemsPrompt } from "@/lib/creator/publish-readiness";
 import { assertUrlSafe } from "@/lib/security/url-guard";
 import { createHash } from "node:crypto";
+import {
+  GLOBAL_PLATFORM_IDS,
+  PLATFORM_DEFINITIONS,
+  isContentLocale,
+  isPlatformId,
+  type PlatformId,
+} from "@/lib/platforms/registry";
+import { isForeignPlatformCreationEnabled } from "@/lib/env";
 
 /**
  * C3 服务端动作注册表。
@@ -73,7 +81,7 @@ async function loadReferenceContext(context: ActionContext): Promise<{
   jobId: string;
   sourceUrl: string;
   brief: ReferenceBrief;
-  platform: "xiaohongshu" | "douyin";
+  platform: PlatformId;
   benchmarkNoteId?: string;
   ideaId?: string;
 }> {
@@ -108,11 +116,13 @@ async function loadReferenceContext(context: ActionContext): Promise<{
       where: { id: job.resultId, userId: context.userId },
     });
     if (!idea) throw new AppError("NOT_FOUND", "参考资料不存在或不属于当前账号。", 404);
+    const cardPlatform = context.card.platform;
+    const platform = isPlatformId(cardPlatform) ? cardPlatform : "xiaohongshu";
     return {
       jobId: job.id,
       sourceUrl: context.card.sourceUrl,
       brief: buildBriefFromIdea(idea, "basic_fetch"),
-      platform: "xiaohongshu",
+      platform,
       ideaId: idea.id,
     };
   }
@@ -172,6 +182,16 @@ export const ACTION_REGISTRY: Record<string, ActionHandler> = {
     repeatable: false,
     execute: async (context) => {
       const reference = await loadReferenceContext(context);
+      if (
+        GLOBAL_PLATFORM_IDS.includes(reference.platform) &&
+        !isForeignPlatformCreationEnabled()
+      ) {
+        throw new AppError(
+          "FEATURE_DISABLED",
+          "国外平台创作功能尚未在当前环境开启。",
+          404,
+        );
+      }
       const generationKey = `reference-original:${reference.jobId}`;
 
       // 双保险幂等:动作级(C3 幂等键)之外,再按导入任务级 key 复用既有生成任务
@@ -208,13 +228,22 @@ export const ACTION_REGISTRY: Record<string, ActionHandler> = {
         conversationId: context.conversationId,
       });
 
+      const conversation = await prisma.conversation.findFirst({
+        where: { id: context.conversationId, userId: context.userId },
+        select: { targetLocale: true },
+      });
+      const definition = PLATFORM_DEFINITIONS[reference.platform];
       const content = await prisma.generatedContent.create({
         data: {
           userId: context.userId,
           conversationId: context.conversationId,
           ideaId: reference.ideaId,
           platform: reference.platform,
-          contentKind: reference.platform === "douyin" ? "douyin_video_script" : "xhs_graphic",
+          contentKind: definition.contentKind,
+          contentLocale: isContentLocale(conversation?.targetLocale)
+            ? conversation.targetLocale
+            : "zh-CN",
+          outputType: definition.contentKind,
           title: reference.brief.source.title
             ? `参考「${reference.brief.source.title.slice(0, 30)}」的原创稿`
             : "参考结构原创稿",

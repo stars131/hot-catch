@@ -1,9 +1,10 @@
-import { Platform } from "@prisma/client";
 import { z } from "zod";
 
-export const aitoearnAuthSchema = z.object({ platform: z.nativeEnum(Platform) });
+const publishablePlatformSchema = z.enum(["xiaohongshu", "douyin"]);
+
+export const aitoearnAuthSchema = z.object({ platform: publishablePlatformSchema });
 export const aitoearnAuthStatusSchema = z.object({
-  platform: z.nativeEnum(Platform),
+  platform: publishablePlatformSchema,
   sessionId: z.string().trim().min(1).max(500),
 });
 

@@ -19,8 +19,7 @@ import type {
   PublishReadinessCard as PublishReadinessCardType,
 } from "@/lib/creator/chat-protocol";
 import type { CardInvokeState } from "@/components/creator/cards/card-renderer";
-
-const PLATFORM_LABEL = { xiaohongshu: "小红书图文", douyin: "抖音脚本" } as const;
+import { PLATFORM_DEFINITIONS } from "@/lib/platforms/registry";
 
 const STATE_BADGE = {
   ready: { label: "已就绪", className: "bg-[#E9EFE6] text-[#3F6B4F]" },
@@ -32,6 +31,7 @@ const CONNECTION_LABEL = {
   connected: "已配置(本地状态)",
   missing: "未配置",
   invalid: "已失效",
+  not_applicable: "无需连接（导出后手动发布）",
 } as const;
 
 const LEVEL_ICON = {
@@ -102,7 +102,7 @@ export function PublishReadinessCardView(props: {
             </span>
           </div>
           <p className="mt-0.5 truncate text-xs text-[#746F67]">
-            {props.card.title} · {PLATFORM_LABEL[props.card.platform]} ·{" "}
+            {props.card.title} · {PLATFORM_DEFINITIONS[props.card.platform].displayName} ·{" "}
             <span className="font-mono">v{props.card.revisionNumber}</span>
           </p>
           <p className="mt-1 flex items-center gap-1 text-xs text-[#746F67]">

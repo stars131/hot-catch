@@ -6,7 +6,6 @@ import { useEffect, useState } from "react";
 import {
   BarChart3,
   BookOpenText,
-  Bot,
   ChevronRight,
   CircleAlert,
   FilePenLine,
@@ -20,20 +19,21 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useTranslations } from "next-intl";
+import { LanguageSwitcher } from "@/components/language-switcher";
 
 const navigation = [
-  { href: "/creator/xiaohongshu", label: "小红书创作", shortLabel: "创作", icon: FilePenLine },
-  { href: "/creator/douyin", label: "抖音脚本", shortLabel: "脚本", icon: Bot },
-  { href: "/hotspots", label: "热点研究", shortLabel: "热点", icon: Flame },
-  { href: "/ideas", label: "选题库", shortLabel: "选题", icon: Lightbulb },
-  { href: "/publish", label: "发布中心", shortLabel: "发布", icon: Rocket },
-  { href: "/retrospectives", label: "数据复盘", shortLabel: "复盘", icon: BarChart3 },
-  { href: "/settings/connections", label: "连接设置", shortLabel: "设置", icon: Settings },
-  { href: "/settings/skills", label: "Skill 设置", shortLabel: "Skill", icon: Puzzle },
+  { href: "/creator", labelKey: "creator", shortLabelKey: "shortCreator", icon: FilePenLine },
+  { href: "/hotspots", labelKey: "hotspots", shortLabelKey: "shortHotspots", icon: Flame },
+  { href: "/ideas", labelKey: "ideas", shortLabelKey: "shortIdeas", icon: Lightbulb },
+  { href: "/publish", labelKey: "publish", shortLabelKey: "shortPublish", icon: Rocket },
+  { href: "/retrospectives", labelKey: "retrospectives", shortLabelKey: "shortRetrospectives", icon: BarChart3 },
+  { href: "/settings/connections", labelKey: "connections", shortLabelKey: "connections", icon: Settings },
+  { href: "/settings/skills", labelKey: "skills", shortLabelKey: "skills", icon: Puzzle },
 ] as const;
 
 const mobileNavigation = navigation.filter((item) =>
-  ["/creator/xiaohongshu", "/hotspots", "/ideas", "/publish", "/retrospectives"].includes(
+  ["/creator", "/hotspots", "/ideas", "/publish", "/retrospectives"].includes(
     item.href,
   ),
 );
@@ -56,6 +56,7 @@ export function AppShell({
   contentClassName,
 }: AppShellProps) {
   const pathname = usePathname();
+  const t = useTranslations("Navigation");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [dependencyState, setDependencyState] = useState<null | {
     database: string;
@@ -85,7 +86,7 @@ export function AppShell({
     <div className="min-h-dvh bg-background">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 border-r bg-[#ECE7DE] lg:flex lg:flex-col">
         <Brand />
-        <nav aria-label="主导航" className="flex-1 space-y-1 px-3 py-5">
+        <nav aria-label={t("mainLabel")} className="flex-1 space-y-1 px-3 py-5">
           {navigation.map((item) => (
             <NavItem key={item.href} item={item} active={pathname.startsWith(item.href)} />
           ))}
@@ -93,10 +94,10 @@ export function AppShell({
         <div className="m-3 rounded-xl border bg-[#F8F5EF] p-3">
           <div className="flex items-center gap-2 text-xs font-semibold">
             <BookOpenText className="h-4 w-4 text-primary" />
-            内测工作流
+            {t("workflowTitle")}
           </div>
           <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
-            研究、创作、发布、复盘分开处理，每一步都保留证据和版本。
+            {t("workflowBody")}
           </p>
         </div>
       </aside>
@@ -108,7 +109,7 @@ export function AppShell({
               type="button"
               onClick={() => setMobileMenuOpen(true)}
               className="inline-flex h-10 w-10 items-center justify-center rounded-lg border bg-card lg:hidden"
-              aria-label="打开导航"
+              aria-label={t("open")}
             >
               <Menu className="h-5 w-5" />
             </button>
@@ -121,14 +122,19 @@ export function AppShell({
                 ) : null}
               </div>
             </div>
-            <div className="flex shrink-0 items-center gap-2">{actions}</div>
+            <div className="flex shrink-0 items-center gap-2">
+              <LanguageSwitcher />
+              {actions}
+            </div>
           </div>
           {degraded ? (
             <div className="flex items-center gap-2 border-t border-amber-300/60 bg-amber-50 px-4 py-2 text-xs text-amber-900 sm:px-6 lg:px-8">
               <CircleAlert className="h-4 w-4 shrink-0" />
               <span>
-                依赖未就绪：数据库 {dependencyState.database === "ok" ? "正常" : "不可用"}，Redis{" "}
-                {dependencyState.redis === "ok" ? "正常" : "不可用"}。相关操作会明确失败，不会使用演示数据。
+                {t("dependencyWarning", {
+                  database: dependencyState.database === "ok" ? t("ok") : t("unavailable"),
+                  redis: dependencyState.redis === "ok" ? t("ok") : t("unavailable"),
+                })}
               </span>
             </div>
           ) : null}
@@ -140,7 +146,7 @@ export function AppShell({
       </div>
 
       <nav
-        aria-label="移动端主导航"
+        aria-label={t("mobileLabel")}
         className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t bg-[#FFFDF9]/95 px-1 pb-[max(6px,env(safe-area-inset-bottom))] pt-1 backdrop-blur lg:hidden"
       >
         {mobileNavigation.map((item) => {
@@ -156,7 +162,7 @@ export function AppShell({
               )}
             >
               <Icon className="h-4 w-4" />
-              <span className="truncate">{item.shortLabel}</span>
+              <span className="truncate">{t(item.shortLabelKey)}</span>
             </Link>
           );
         })}
@@ -171,7 +177,7 @@ export function AppShell({
                 type="button"
                 onClick={() => setMobileMenuOpen(false)}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg border bg-card"
-                aria-label="关闭导航"
+                aria-label={t("close")}
               >
                 <X className="h-4 w-4" />
               </button>
@@ -194,15 +200,16 @@ export function AppShell({
 }
 
 function Brand() {
+  const t = useTranslations("Navigation");
   return (
-    <Link href="/creator/xiaohongshu" className="flex h-[72px] items-center gap-3 px-5">
+    <Link href="/creator" className="flex h-[72px] items-center gap-3 px-5">
       <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
         <SlidersHorizontal className="h-4 w-4" />
       </span>
       <span>
-        <span className="block text-sm font-semibold tracking-tight">星迹内容助手</span>
+        <span className="block text-sm font-semibold tracking-tight">STARTRACE</span>
         <span className="font-mono-metric block text-[9px] uppercase tracking-[0.16em] text-muted-foreground">
-          invited beta
+          {t("beta")}
         </span>
       </span>
     </Link>
@@ -214,6 +221,7 @@ function NavItem(props: {
   active: boolean;
   onNavigate?: () => void;
 }) {
+  const t = useTranslations("Navigation");
   const Icon = props.item.icon;
   return (
     <Link
@@ -227,7 +235,7 @@ function NavItem(props: {
       )}
     >
       <Icon className={cn("h-4 w-4", props.active && "text-primary")} />
-      <span className="flex-1">{props.item.label}</span>
+      <span className="flex-1">{t(props.item.labelKey)}</span>
       {props.active ? <ChevronRight className="h-3.5 w-3.5 text-primary" /> : null}
     </Link>
   );

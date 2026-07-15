@@ -4,6 +4,7 @@ import { fail, ok } from "@/lib/http";
 import { enqueueJob } from "@/lib/jobs/queues";
 import {
   preparePublishRecord,
+  assertContentPublishingSupported,
   resolvePublishingProvider,
   submitPublishRecord,
 } from "@/lib/services/publishing-service";
@@ -25,6 +26,7 @@ export async function POST(request: Request) {
   try {
     const user = await requireUser();
     const input = createPublishFlowSchema.parse(await request.json());
+    await assertContentPublishingSupported(user.id, input.contentId);
     const { mode } = await resolvePublishingProvider(user.id);
     const record = await preparePublishRecord(
       user.id,

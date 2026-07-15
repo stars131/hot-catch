@@ -10,10 +10,12 @@ import type { SocialAccount, SocialContent } from "@/lib/providers/types";
 import { loadCredential } from "@/lib/services/credential-service";
 import { assertUrlSafe, extractHtmlSummary, safeFetchText } from "@/lib/security/url-guard";
 import { enqueueJob } from "@/lib/jobs/queues";
+import { PLATFORM_IDS, type PlatformId } from "@/lib/platforms/registry";
 
 const inputSchema = z.object({
   url: z.string().url(),
   kind: z.enum(["account", "content", "webpage"]).optional(),
+  platform: z.enum([...PLATFORM_IDS, "web"]).optional(),
   conversationId: z.string().optional(),
 });
 
@@ -30,7 +32,12 @@ const referenceImportHandler: JobHandler = async (payload, reportProgress) => {
     hostname.includes("douyin.com") ||
     hostname.includes("iesdouyin.com");
   if (input.kind === "webpage" || !isSocialUrl) {
-    return importWebReference(payload.userId, safeUrl, reportProgress);
+    return importWebReference(
+      payload.userId,
+      safeUrl,
+      reportProgress,
+      input.platform ?? "web",
+    );
   }
 
   let credential: Record<string, string>;
@@ -212,6 +219,7 @@ async function importWebReference(
   userId: string,
   url: string,
   reportProgress: (progress: number, stage: string) => Promise<void>,
+  platform: PlatformId | "web" = "web",
 ) {
   // 同一用户重复导入同一网页:直接复用已有 Idea,不重复创建
   const existing = await prisma.idea.findFirst({
@@ -234,31 +242,33 @@ async function importWebReference(
     if (!isAppError(error) || error.code !== "CREDENTIAL_NOT_CONFIGURED") throw error;
   }
 
-  if (credential) {
-    const apiKey = credential.apiKey ?? credential.token;
-    if (!apiKey) throw new AppError("CREDENTIAL_INVALID", "Firecrawl 凭证缺少 apiKey。", 422);
-    await reportProgress(35, "提取网页正文");
-    const result = await new FirecrawlProvider(apiKey, credential.baseUrl).importUrl(url);
-    extracted = { title: result.title, markdown: result.markdown, metadata: result.metadata, method: "firecrawl" };
-  } else {
-    // Firecrawl 未配置:安全基础抓取兜底(SSRF 复检、限重定向、限大小、限超时)
-    await reportProgress(35, "基础抓取网页(未配置 Firecrawl)");
-    const fetched = await safeFetchText(url);
-    const summary = extractHtmlSummary(fetched.text);
-    if (!summary.text) {
-      return {
-        finalStatus: "waiting_input" as const,
-        output: {
-          reason: "WEB_CONTENT_EMPTY",
-          message: "网页未提取到正文;可配置 Firecrawl 后重试,或手工粘贴网页摘要。",
-        },
+  try {
+    if (credential) {
+      const apiKey = credential.apiKey ?? credential.token;
+      if (!apiKey) throw new AppError("CREDENTIAL_INVALID", "Firecrawl 凭证缺少 apiKey。", 422);
+      await reportProgress(35, "使用 Firecrawl 提取公开页面");
+      const result = await new FirecrawlProvider(apiKey, credential.baseUrl).importUrl(url);
+      extracted = { title: result.title, markdown: result.markdown, metadata: result.metadata, method: "firecrawl" };
+    } else {
+      await reportProgress(35, "安全抓取公开页面");
+      const fetched = await safeFetchText(url);
+      const summary = extractHtmlSummary(fetched.text);
+      if (!summary.text) throw new Error("empty public page");
+      extracted = {
+        title: summary.title || undefined,
+        markdown: summary.text,
+        metadata: { fetchedFrom: fetched.finalUrl, truncated: fetched.truncated, method: "basic_fetch" },
+        method: "basic_fetch",
       };
     }
-    extracted = {
-      title: summary.title || undefined,
-      markdown: summary.text,
-      metadata: { fetchedFrom: fetched.finalUrl, truncated: fetched.truncated, method: "basic_fetch" },
-      method: "basic_fetch",
+  } catch (error) {
+    if (isAppError(error) && error.code === "CREDENTIAL_INVALID") throw error;
+    return {
+      finalStatus: "waiting_input" as const,
+      output: {
+        reason: "PUBLIC_REFERENCE_BLOCKED",
+        message: "公开页面拒绝访问或未提取到正文。请粘贴你有权使用的摘要后继续；系统不会虚构来源内容。",
+      },
     };
   }
 
@@ -271,7 +281,12 @@ async function importWebReference(
       notes: extracted.markdown.slice(0, 5000),
       evidence: {
         sourceUrl: url,
+        platform,
         importedBy: extracted.method,
+        usage: "current_user_inference_only",
+        ...(platform === "reddit"
+          ? { policyNote: "Reddit content is not used for model training or cross-user datasets." }
+          : {}),
         metadata: extracted.metadata,
         markdown: extracted.markdown.slice(0, 50000),
       } as Prisma.InputJsonValue,

@@ -14,13 +14,15 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { readApiJson } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { useLocale, useTranslations } from "next-intl";
+import { GLOBAL_PLATFORM_IDS, type PlatformId } from "@/lib/platforms/registry";
 
-type Platform = "xiaohongshu" | "douyin";
-type Content = { id: string; title: string | null; platform: Platform; contentKind: string; status: string; updatedAt: string; _count: { revisions: number; publishRecords: number } };
-type Account = { id: string; platform: Platform; name: string; avatarUrl?: string; status: "active" | "expired" | "invalid" };
+type PublishPlatform = "xiaohongshu" | "douyin";
+type Content = { id: string; title: string | null; platform: PlatformId; contentKind: string; status: string; updatedAt: string; _count: { revisions: number; publishRecords: number } };
+type Account = { id: string; platform: PublishPlatform; name: string; avatarUrl?: string; status: "active" | "expired" | "invalid" };
 type Upload = { name: string; type: "image" | "video"; url: string; size: number };
 type RecordStatus = "draft" | "scheduled" | "uploading" | "submitted" | "awaiting_user" | "published" | "failed" | "canceled";
-type PublishRecord = { id: string; contentId: string; platform: Platform; status: RecordStatus; providerAccountId: string; scheduledAt: string | null; submittedAt: string | null; publishedAt: string | null; shortLink: string | null; publicUrl: string | null; failureCode: string | null; failureReason: string | null; attemptCount: number; lastSyncedAt: string | null; createdAt: string; content?: { title: string | null } };
+type PublishRecord = { id: string; contentId: string; platform: PublishPlatform; status: RecordStatus; providerAccountId: string; scheduledAt: string | null; submittedAt: string | null; publishedAt: string | null; shortLink: string | null; publicUrl: string | null; failureCode: string | null; failureReason: string | null; attemptCount: number; lastSyncedAt: string | null; createdAt: string; content?: { title: string | null } };
 type Signature = { assetId: string; uploadUrl: string; method: "PUT" | "POST"; fields?: Record<string, string>; headers?: Record<string, string>; assetUrl?: string; simulated?: boolean };
 
 const FINAL_STATUSES = new Set<RecordStatus>(["published", "failed", "canceled"]);
@@ -34,12 +36,15 @@ export default function PublishPage() {
 }
 
 function PublishWorkspace() {
+  const t = useTranslations("Publish");
+  const tp = useTranslations("Platforms");
   const searchParams = useSearchParams();
   /** 创作工作台移交上下文:只用于预选与提示,不代表任何已创建的发布记录 */
   const handoffContentId = searchParams.get("contentId");
   const fromCreator = searchParams.get("from") === "creator";
 
   const [contents, setContents] = useState<Content[]>([]);
+  const [exportOnlyContents, setExportOnlyContents] = useState<Content[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [accountsUnavailable, setAccountsUnavailable] = useState(false);
   const [connection, setConnection] = useState<"connected" | "invalid" | "not_configured" | null>(null);
@@ -67,8 +72,14 @@ function PublishWorkspace() {
         readApiJson<{ accounts: Account[] }>(await fetch("/api/integrations/aitoearn/accounts", { cache: "no-store" })).catch(() => { accountsFailed = true; return { accounts: [] as Account[] }; }),
         readApiJson<{ records: PublishRecord[]; providerMode?: "mock" | "real" }>(await fetch("/api/publish/records", { cache: "no-store" })),
       ]);
-      const ready = contentData.contents.filter((content) => content._count.revisions > 0);
+      const allReady = contentData.contents.filter((content) => content._count.revisions > 0);
+      const ready = allReady.filter(
+        (content) => content.platform === "xiaohongshu" || content.platform === "douyin",
+      );
       setContents(ready);
+      setExportOnlyContents(
+        allReady.filter((content) => GLOBAL_PLATFORM_IDS.includes(content.platform)),
+      );
       setAccounts(accountData.accounts);
       setConnection(statusData?.connection ?? null);
       setAccountsUnavailable(accountsFailed);
@@ -80,9 +91,9 @@ function PublishWorkspace() {
         : false;
       setHandoffMissing(Boolean(handoffContentId) && !handoffReady);
       setContentId((current) => current || (handoffReady ? handoffContentId! : ready[0]?.id || ""));
-    } catch (cause) { toast.error(cause instanceof Error ? cause.message : "发布数据加载失败"); }
+    } catch { toast.error(t("loadFailed")); }
     finally { setLoading(false); }
-  }, [handoffContentId]);
+  }, [handoffContentId, t]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -95,11 +106,11 @@ function PublishWorkspace() {
     try {
       const data = await readApiJson<{ record: PublishRecord }>(await fetch(`/api/publish/records/${id}?refresh=1`, { cache: "no-store" }));
       setRecords((current) => [data.record, ...current.filter((item) => item.id !== id)]);
-      if (showToast) toast.success("发布状态已更新");
+      if (showToast) toast.success(t("statusUpdated"));
       return data.record;
-    } catch (cause) { if (showToast) toast.error(cause instanceof Error ? cause.message : "状态刷新失败"); return null; }
+    } catch { if (showToast) toast.error(t("refreshFailed")); return null; }
     finally { setSyncingId(null); }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!activeRecordId) return;
@@ -112,9 +123,9 @@ function PublishWorkspace() {
   async function uploadFile(file: File) {
     if (!selectedContent) return;
     const assetType = file.type.startsWith("video/") ? "video" : file.type.startsWith("image/") ? "image" : null;
-    if (!assetType) return toast.error("只支持图片或视频文件");
-    if (selectedContent.platform === "xiaohongshu" && assetType !== "image") return toast.error("小红书图文只能上传图片");
-    if (selectedContent.platform === "douyin" && assetType !== "video") return toast.error("抖音发布需要上传视频");
+    if (!assetType) return toast.error(t("assetTypeError"));
+    if (selectedContent.platform === "xiaohongshu" && assetType !== "image") return toast.error(t("xhsImageOnly"));
+    if (selectedContent.platform === "douyin" && assetType !== "video") return toast.error(t("douyinVideoOnly"));
     setUploadProgress(10);
     try {
       const signed = await readApiJson<{ upload: Signature }>(await fetch("/api/publish/assets/sign", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fileName: file.name, contentType: file.type, size: file.size }) }));
@@ -126,17 +137,17 @@ function PublishWorkspace() {
         Object.entries(signed.upload.fields ?? {}).forEach(([key, value]) => body.append(key, value));
         body.append("file", file);
         const response = await fetch(signed.upload.uploadUrl, { method: "POST", body });
-        if (!response.ok) throw new Error(`素材直传失败（${response.status}）`);
+        if (!response.ok) throw new Error(t("directUploadFailed", { status: response.status }));
       } else {
         const response = await fetch(signed.upload.uploadUrl, { method: "PUT", headers: { "content-type": file.type, ...(signed.upload.headers ?? {}) }, body: file });
-        if (!response.ok) throw new Error(`素材直传失败（${response.status}）`);
+        if (!response.ok) throw new Error(t("directUploadFailed", { status: response.status }));
       }
       setUploadProgress(80);
       const confirmed = await readApiJson<{ asset: { assetUrl: string } }>(await fetch("/api/publish/assets/confirm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ assetId: signed.upload.assetId }) }));
       setUploads((current) => [...current, { name: file.name, type: assetType, url: confirmed.asset.assetUrl || signed.upload.assetUrl || "", size: file.size }]);
       setUploadProgress(100);
-      toast.success(signed.upload.simulated ? "模拟素材已登记（未上传任何真实文件）" : "素材已直传 AiToEarn");
-    } catch (cause) { toast.error(cause instanceof Error ? cause.message : "上传失败"); }
+      toast.success(signed.upload.simulated ? t("simulatedAsset") : t("assetUploaded"));
+    } catch (cause) { toast.error(cause instanceof Error ? cause.message : t("uploadFailed")); }
     finally { window.setTimeout(() => setUploadProgress(null), 600); }
   }
 
@@ -148,9 +159,9 @@ function PublishWorkspace() {
       setActiveRecordId(data.recordId);
       if (data.record) setRecords((current) => [data.record!, ...current.filter((item) => item.id !== data.record!.id)]);
       idempotencyKey.current = crypto.randomUUID();
-      toast.success(data.providerMode === "mock" ? "模拟发布已进入本地状态机（不会发布到真实平台）" : scheduledAt ? "定时发布任务已创建" : "发布任务已提交");
+      toast.success(data.providerMode === "mock" ? t("mockSubmitted") : scheduledAt ? t("scheduledCreated") : t("submitted"));
       await load();
-    } catch (cause) { toast.error(cause instanceof Error ? cause.message : "发布提交失败"); }
+    } catch { toast.error(t("submitFailed")); }
     finally { setSubmitting(false); }
   }
 
@@ -159,20 +170,43 @@ function PublishWorkspace() {
     try {
       await readApiJson(await fetch(`/api/publish/records/${record.id}/${mode}`, { method: "POST" }));
       if (mode === "retry") setActiveRecordId(record.id);
-      toast.success(mode === "retry" ? "已重新进入发布队列" : "发布已取消");
+      toast.success(mode === "retry" ? t("requeued") : t("canceledToast"));
       await load();
-    } catch (cause) { toast.error(cause instanceof Error ? cause.message : "操作失败"); }
+    } catch { toast.error(t("actionFailed")); }
     finally { setSyncingId(null); }
   }
 
   return (
-    <AppShell title="发布中心" description="从已保存版本创建发布记录；素材由浏览器直传 AiToEarn，服务器不转发大文件。" actions={<Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw className="h-4 w-4" />刷新账号</Button>}>
+    <AppShell title={t("title")} description={t("description")} actions={<Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw className="h-4 w-4" />{t("refreshAccounts")}</Button>}>
+      {exportOnlyContents.length ? (
+        <Card className="mb-5 border-violet-200 bg-violet-50/60" data-testid="foreign-export-only">
+          <CardHeader className="pb-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-base">{t("exportOnlyTitle")}</CardTitle>
+                <CardDescription className="mt-1 max-w-3xl">{t("exportOnlyBody")}</CardDescription>
+              </div>
+              <Button asChild size="sm" variant="outline">
+                <Link href="/creator">{t("goCreator")}</Link>
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            <Badge variant="outline">{t("exportCount", { count: exportOnlyContents.length })}</Badge>
+            {exportOnlyContents.map((content) => (
+              <Badge key={content.id} variant="secondary">
+                {tp(content.platform)} · {content.title || "—"}
+              </Badge>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
       {providerMode === "mock" ? (
         <div className="mb-5 flex items-start gap-3 rounded-lg border border-sky-200 bg-sky-50 p-4" data-testid="publish-mock-banner" role="status">
           <FlaskConical className="mt-0.5 h-4 w-4 shrink-0 text-sky-700" />
           <div className="min-w-0 flex-1 text-sm leading-6 text-sky-950">
-            <p className="font-medium">本地模拟模式</p>
-            <p className="mt-0.5 text-xs leading-5 text-sky-800">发布流程运行在本地状态机与契约夹具上：不会调用真实 AiToEarn，不会上传真实素材，也不会发布到真实平台。真实发布需要在部署环境显式开启。</p>
+            <p className="font-medium">{t("mockModeTitle")}</p>
+            <p className="mt-0.5 text-xs leading-5 text-sky-800">{t("mockModeBody")}</p>
           </div>
         </div>
       ) : null}
@@ -180,37 +214,41 @@ function PublishWorkspace() {
         <div className="mb-5 flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4" data-testid="publish-handoff-banner" role="status">
           <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
           <div className="min-w-0 flex-1 text-sm leading-6 text-emerald-950">
-            <p className="font-medium">来自创作工作台的移交</p>
-            <p className="mt-0.5 text-xs leading-5 text-emerald-800">已为你预选对应内容。请核对内容版本、选择账号并上传素材后手动确认发布；系统不会自动发布。</p>
-            {handoffMissing ? <p className="mt-1 text-xs font-medium text-amber-800" data-testid="publish-handoff-missing">移交的内容不存在、不属于当前账号或还没有已保存版本，已回退到默认列表。</p> : null}
+            <p className="font-medium">{t("handoffTitle")}</p>
+            <p className="mt-0.5 text-xs leading-5 text-emerald-800">{t("handoffBody")}</p>
+            {handoffMissing ? <p className="mt-1 text-xs font-medium text-amber-800" data-testid="publish-handoff-missing">{t("handoffMissing")}</p> : null}
           </div>
-          <button type="button" className="shrink-0 text-emerald-700 hover:text-emerald-900" aria-label="关闭移交提示" onClick={() => setHandoffBannerOpen(false)}><X className="h-4 w-4" /></button>
+          <button type="button" className="shrink-0 text-emerald-700 hover:text-emerald-900" aria-label={t("closeHandoff")} onClick={() => setHandoffBannerOpen(false)}><X className="h-4 w-4" /></button>
         </div>
       ) : null}
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <Card><CardHeader><CardTitle>新建发布</CardTitle><CardDescription>发布前请确认正文版本、平台账号、素材和时间。重复点击使用同一幂等键，不会重复创建。</CardDescription></CardHeader><CardContent className="space-y-5">
-          {loading ? <div className="h-64 animate-pulse rounded-lg bg-muted" /> : !contents.length ? <div className="rounded-lg border border-dashed p-10 text-center"><p className="font-medium">还没有可发布版本</p><p className="mt-1 text-sm text-muted-foreground">先在创作工作台保存至少一个内容版本。</p></div> : <>
-            <label><span className="mb-2 block text-sm font-medium">内容版本</span><select className="h-11 w-full rounded-md border bg-background px-3 text-sm" value={contentId} onChange={(event) => setContentId(event.target.value)}>{contents.map((content) => <option key={content.id} value={content.id}>{content.platform === "douyin" ? "抖音" : "小红书"} · {content.title || "未命名"} · {content._count.revisions} 个版本</option>)}</select></label>
-            <label><span className="mb-2 block text-sm font-medium">发布账号</span><select className="h-11 w-full rounded-md border bg-background px-3 text-sm" value={accountId} onChange={(event) => setAccountId(event.target.value)}><option value="">选择账号</option>{matchingAccounts.map((account) => <option key={account.id} value={account.id} disabled={account.status !== "active"}>{account.name}{account.status !== "active" ? "（已过期）" : ""}</option>)}</select>{accountsUnavailable ? <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3" data-testid="publish-connection-required"><PlugZap className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" /><div className="min-w-0 text-xs leading-5 text-amber-900"><p className="font-medium">{connection === "not_configured" ? "连接未配置：无法加载发布账号" : connection === "invalid" ? "凭证已失效：无法加载发布账号" : "连接未就绪：无法加载发布账号"}</p><p className="mt-0.5">{connection === "not_configured" ? "尚未保存 AiToEarn API Key。发布需要先完成连接与账号授权，系统不会用模拟账号代替。" : connection === "invalid" ? "AiToEarn 凭证已失效或被撤销，请到连接设置替换凭证后重试。" : "账号加载失败，可能是凭证问题或供应商暂时不可用；系统不会用模拟账号代替。"}</p><Button asChild size="sm" variant="outline" className="mt-2"><Link href="/settings/connections">前往连接设置</Link></Button></div></div> : !matchingAccounts.length ? <p className="mt-2 text-xs text-amber-700">没有可用账号，请先到<Link className="underline underline-offset-2" href="/settings/connections">连接设置</Link>完成授权并同步。</p> : null}</label>
-            <div><span className="mb-2 block text-sm font-medium">发布素材</span><label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed bg-muted/20 px-4 text-center hover:bg-muted/40"><FileUp className="h-5 w-5 text-muted-foreground" /><span className="mt-2 text-sm font-medium">{selectedContent?.platform === "douyin" ? "选择一个成片视频" : "选择一张或多张图片"}</span><span className="mt-1 text-xs text-muted-foreground">选择后直接上传到供应商签名地址</span><input className="sr-only" type="file" accept={selectedContent?.platform === "douyin" ? "video/*" : "image/*"} multiple={selectedContent?.platform === "xiaohongshu"} onChange={(event) => { Array.from(event.target.files ?? []).forEach((file) => void uploadFile(file)); event.target.value = ""; }} /></label>{uploadProgress != null ? <div className="mt-3"><Progress value={uploadProgress} className="h-2" /><p className="mt-1 text-right font-mono text-xs text-muted-foreground">{uploadProgress}%</p></div> : null}<div className="mt-3 space-y-2">{uploads.map((upload, index) => <div key={`${upload.url}-${index}`} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm"><span className="min-w-0 truncate">{upload.name} · {(upload.size / 1024 / 1024).toFixed(1)} MB</span><Button variant="ghost" size="icon" onClick={() => setUploads((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X className="h-4 w-4" /></Button></div>)}</div></div>
-            <label><span className="mb-2 block text-sm font-medium">发布时间（可选）</span><Input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} min={new Date(Date.now() + 5 * 60_000).toISOString().slice(0, 16)} /></label>
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">提交后供应商超时会先查询既有记录，不会盲目再次发布。抖音进入“等待用户确认”时，请使用短链唤起抖音完成最后一步。</div>
-            <Button className="w-full" size="lg" disabled={!accountId || !uploads.length || submitting || uploadProgress != null} onClick={() => void submit()}>{submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : scheduledAt ? <CalendarClock className="h-4 w-4" /> : <Send className="h-4 w-4" />}{scheduledAt ? "创建定时发布" : "确认并发布"}</Button>
+        <Card><CardHeader><CardTitle>{t("newPublish")}</CardTitle><CardDescription>{t("newPublishDescription")}</CardDescription></CardHeader><CardContent className="space-y-5">
+          {loading ? <div className="h-64 animate-pulse rounded-lg bg-muted" /> : !contents.length ? <div className="rounded-lg border border-dashed p-10 text-center"><p className="font-medium">{t("noPublishableTitle")}</p><p className="mt-1 text-sm text-muted-foreground">{t("noPublishableBody")}</p></div> : <>
+            <label><span className="mb-2 block text-sm font-medium">{t("contentVersion")}</span><select className="h-11 w-full rounded-md border bg-background px-3 text-sm" value={contentId} onChange={(event) => setContentId(event.target.value)}>{contents.map((content) => <option key={content.id} value={content.id}>{content.platform === "douyin" ? tp("douyin") : tp("xiaohongshu")} · {content.title || t("untitled")} · {t("revisionCount", { count: content._count.revisions })}</option>)}</select></label>
+            <label><span className="mb-2 block text-sm font-medium">{t("publishAccount")}</span><select className="h-11 w-full rounded-md border bg-background px-3 text-sm" value={accountId} onChange={(event) => setAccountId(event.target.value)}><option value="">{t("selectAccount")}</option>{matchingAccounts.map((account) => <option key={account.id} value={account.id} disabled={account.status !== "active"}>{account.name}{account.status !== "active" ? t("expiredSuffix") : ""}</option>)}</select>{accountsUnavailable ? <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3" data-testid="publish-connection-required"><PlugZap className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" /><div className="min-w-0 text-xs leading-5 text-amber-900"><p className="font-medium">{connection === "not_configured" ? t("connectionMissingTitle") : connection === "invalid" ? t("connectionInvalidTitle") : t("connectionUnavailableTitle")}</p><p className="mt-0.5">{connection === "not_configured" ? t("connectionMissingBody") : connection === "invalid" ? t("connectionInvalidBody") : t("connectionUnavailableBody")}</p><Button asChild size="sm" variant="outline" className="mt-2"><Link href="/settings/connections">{t("goConnections")}</Link></Button></div></div> : !matchingAccounts.length ? <p className="mt-2 text-xs text-amber-700">{t("noAccountPrefix")}<Link className="underline underline-offset-2" href="/settings/connections">{t("connectionsLink")}</Link>{t("noAccountSuffix")}</p> : null}</label>
+            <div><span className="mb-2 block text-sm font-medium">{t("publishAssets")}</span><label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed bg-muted/20 px-4 text-center hover:bg-muted/40"><FileUp className="h-5 w-5 text-muted-foreground" /><span className="mt-2 text-sm font-medium">{selectedContent?.platform === "douyin" ? t("chooseVideo") : t("chooseImages")}</span><span className="mt-1 text-xs text-muted-foreground">{t("uploadHelp")}</span><input className="sr-only" type="file" accept={selectedContent?.platform === "douyin" ? "video/*" : "image/*"} multiple={selectedContent?.platform === "xiaohongshu"} onChange={(event) => { Array.from(event.target.files ?? []).forEach((file) => void uploadFile(file)); event.target.value = ""; }} /></label>{uploadProgress != null ? <div className="mt-3"><Progress value={uploadProgress} className="h-2" /><p className="mt-1 text-right font-mono text-xs text-muted-foreground">{uploadProgress}%</p></div> : null}<div className="mt-3 space-y-2">{uploads.map((upload, index) => <div key={`${upload.url}-${index}`} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm"><span className="min-w-0 truncate">{upload.name} · {(upload.size / 1024 / 1024).toFixed(1)} MB</span><Button aria-label={t("removeAsset")} variant="ghost" size="icon" onClick={() => setUploads((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X className="h-4 w-4" /></Button></div>)}</div></div>
+            <label><span className="mb-2 block text-sm font-medium">{t("publishTime")}</span><Input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} min={new Date(Date.now() + 5 * 60_000).toISOString().slice(0, 16)} /></label>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">{t("idempotencyNotice")}</div>
+            <Button className="w-full" size="lg" disabled={!accountId || !uploads.length || submitting || uploadProgress != null} onClick={() => void submit()}>{submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : scheduledAt ? <CalendarClock className="h-4 w-4" /> : <Send className="h-4 w-4" />}{scheduledAt ? t("createScheduled") : t("confirmPublish")}</Button>
           </>}
         </CardContent></Card>
 
-        <div className="min-w-0 space-y-4"><div><h2 className="font-semibold">最近发布</h2><p className="mt-1 text-sm text-muted-foreground">状态每 2 秒刷新，进入终态后停止轮询。</p></div>{!records.length ? <Card><CardContent className="py-12 text-center text-sm text-muted-foreground">暂无发布记录</CardContent></Card> : records.map((record) => <RecordCard key={record.id} record={record} busy={syncingId === record.id} onRefresh={() => void refreshRecord(record.id, true)} onRetry={() => void action(record, "retry")} onCancel={() => void action(record, "cancel")} />)}</div>
+        <div className="min-w-0 space-y-4"><div><h2 className="font-semibold">{t("recentPublishes")}</h2><p className="mt-1 text-sm text-muted-foreground">{t("recentPublishesHelp")}</p></div>{!records.length ? <Card><CardContent className="py-12 text-center text-sm text-muted-foreground">{t("noPublishRecords")}</CardContent></Card> : records.map((record) => <RecordCard key={record.id} record={record} busy={syncingId === record.id} onRefresh={() => void refreshRecord(record.id, true)} onRetry={() => void action(record, "retry")} onCancel={() => void action(record, "cancel")} />)}</div>
       </div>
     </AppShell>
   );
 }
 
 function RecordCard({ record, busy, onRefresh, onRetry, onCancel }: { record: PublishRecord; busy: boolean; onRefresh: () => void; onRetry: () => void; onCancel: () => void }) {
+  const t = useTranslations("Publish");
+  const tp = useTranslations("Platforms");
+  const locale = useLocale();
   const [showPerformance, setShowPerformance] = useState(false);
-  return <Card data-testid={`publish-record-${record.id}`} className={cn(record.status === "awaiting_user" && "border-amber-300", record.status === "failed" && "border-red-300")}><CardHeader className="pb-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><CardTitle className="truncate text-base">{record.content?.title || "内容发布"}</CardTitle><CardDescription className="mt-1">{record.platform === "douyin" ? "抖音" : "小红书"} · {new Date(record.createdAt).toLocaleString("zh-CN")}</CardDescription></div><PublishBadge status={record.status} /></div></CardHeader><CardContent className="space-y-3">{record.status === "awaiting_user" ? <div className="rounded-lg border border-amber-200 bg-amber-50 p-3"><p className="text-sm font-medium text-amber-950">还差用户确认</p><p className="mt-1 text-xs leading-5 text-amber-800">请在手机上打开短链并在抖音完成发布确认。</p>{record.shortLink ? <Button className="mt-3 w-full" asChild><a href={record.shortLink} target="_blank" rel="noreferrer">打开抖音确认 <ExternalLink className="h-4 w-4" /></a></Button> : <p className="mt-2 text-xs font-medium text-red-700">供应商暂未返回短链，请刷新状态。</p>}</div> : null}{record.status === "failed" ? <div className="flex gap-2 rounded-lg bg-red-50 p-3 text-xs text-red-900"><CircleAlert className="h-4 w-4 shrink-0" /><span>{record.failureReason || record.failureCode || "发布失败，供应商未返回具体原因。"}</span></div> : null}{record.publicUrl ? <Button variant="outline" className="w-full" asChild><a href={record.publicUrl} target="_blank" rel="noreferrer"><Check className="h-4 w-4" />查看已发布作品</a></Button> : null}{showPerformance ? <RecordPerformance contentId={record.contentId} recordId={record.id} /> : null}<div className="flex gap-2"><Button variant="outline" size="sm" onClick={onRefresh} disabled={busy}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}刷新</Button><Button variant="outline" size="sm" data-testid={`performance-toggle-${record.id}`} onClick={() => setShowPerformance((open) => !open)}><BarChart3 className="h-4 w-4" />{showPerformance ? "收起数据" : "数据表现"}</Button>{record.status === "failed" ? <Button size="sm" onClick={onRetry} disabled={busy}><RotateCcw className="h-4 w-4" />重试</Button> : null}{!["published", "canceled", "failed"].includes(record.status) ? <Button variant="ghost" size="sm" className="ml-auto text-red-700" onClick={onCancel} disabled={busy}>取消</Button> : null}</div></CardContent></Card>;
+  return <Card data-testid={`publish-record-${record.id}`} className={cn(record.status === "awaiting_user" && "border-amber-300", record.status === "failed" && "border-red-300")}><CardHeader className="pb-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><CardTitle className="truncate text-base">{record.content?.title || t("publishContent")}</CardTitle><CardDescription className="mt-1">{record.platform === "douyin" ? tp("douyin") : tp("xiaohongshu")} · {new Date(record.createdAt).toLocaleString(locale)}</CardDescription></div><PublishBadge status={record.status} /></div></CardHeader><CardContent className="space-y-3">{record.status === "awaiting_user" ? <div className="rounded-lg border border-amber-200 bg-amber-50 p-3"><p className="text-sm font-medium text-amber-950">{t("awaitingUserTitle")}</p><p className="mt-1 text-xs leading-5 text-amber-800">{t("awaitingUserBody")}</p>{record.shortLink ? <Button className="mt-3 w-full" asChild><a href={record.shortLink} target="_blank" rel="noreferrer">{t("openDouyin")} <ExternalLink className="h-4 w-4" /></a></Button> : <p className="mt-2 text-xs font-medium text-red-700">{t("shortLinkMissing")}</p>}</div> : null}{record.status === "failed" ? <div className="flex gap-2 rounded-lg bg-red-50 p-3 text-xs text-red-900"><CircleAlert className="h-4 w-4 shrink-0" /><span>{record.failureCode ? t("publishFailedSafe", { code: record.failureCode }) : t("publishFailedUnknown")}</span></div> : null}{record.publicUrl ? <Button variant="outline" className="w-full" asChild><a href={record.publicUrl} target="_blank" rel="noreferrer"><Check className="h-4 w-4" />{t("viewPublished")}</a></Button> : null}{showPerformance ? <RecordPerformance contentId={record.contentId} recordId={record.id} /> : null}<div className="flex gap-2"><Button variant="outline" size="sm" onClick={onRefresh} disabled={busy}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}{t("refresh")}</Button><Button variant="outline" size="sm" data-testid={`performance-toggle-${record.id}`} onClick={() => setShowPerformance((open) => !open)}><BarChart3 className="h-4 w-4" />{showPerformance ? t("hidePerformance") : t("performance")}</Button>{record.status === "failed" ? <Button size="sm" onClick={onRetry} disabled={busy}><RotateCcw className="h-4 w-4" />{t("retry")}</Button> : null}{!["published", "canceled", "failed"].includes(record.status) ? <Button variant="ghost" size="sm" className="ml-auto text-red-700" onClick={onCancel} disabled={busy}>{t("cancel")}</Button> : null}</div></CardContent></Card>;
 }
 
 function PublishBadge({ status }: { status: RecordStatus }) {
-  const map: Record<RecordStatus, { label: string; style: string }> = { draft: { label: "准备中", style: "" }, scheduled: { label: "已定时", style: "border-blue-200 bg-blue-50 text-blue-700" }, uploading: { label: "上传中", style: "border-blue-200 bg-blue-50 text-blue-700" }, submitted: { label: "已提交", style: "border-blue-200 bg-blue-50 text-blue-700" }, awaiting_user: { label: "等待确认", style: "border-amber-200 bg-amber-50 text-amber-700" }, published: { label: "已发布", style: "border-emerald-200 bg-emerald-50 text-emerald-700" }, failed: { label: "失败", style: "border-red-200 bg-red-50 text-red-700" }, canceled: { label: "已取消", style: "" } };
+  const t = useTranslations("Publish.status");
+  const map: Record<RecordStatus, { label: string; style: string }> = { draft: { label: t("draft"), style: "" }, scheduled: { label: t("scheduled"), style: "border-blue-200 bg-blue-50 text-blue-700" }, uploading: { label: t("uploading"), style: "border-blue-200 bg-blue-50 text-blue-700" }, submitted: { label: t("submitted"), style: "border-blue-200 bg-blue-50 text-blue-700" }, awaiting_user: { label: t("awaiting_user"), style: "border-amber-200 bg-amber-50 text-amber-700" }, published: { label: t("published"), style: "border-emerald-200 bg-emerald-50 text-emerald-700" }, failed: { label: t("failed"), style: "border-red-200 bg-red-50 text-red-700" }, canceled: { label: t("canceled"), style: "" } };
   return <Badge variant="outline" className={map[status].style}>{map[status].label}</Badge>;
 }

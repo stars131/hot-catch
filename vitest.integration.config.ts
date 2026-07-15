@@ -21,6 +21,8 @@ export default defineConfig({
       URL_GUARD_ALLOWLIST: "web.test,tikhub.test",
       // 集成测试固定走本地模拟发布，绝不触发真实 AiToEarn 调用
       PUBLISH_PROVIDER_MODE: "mock",
+      FOREIGN_PLATFORM_CREATION_ENABLED: "1",
+      UI_I18N_ENABLED: "1",
     },
   },
 });

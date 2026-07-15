@@ -237,7 +237,7 @@ test("a failed mock publish shows the reason and recovers through guarded retry"
 
   const card = page.getByTestId(`publish-record-${recordId}`);
   await expect(card.getByText("失败", { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(card.getByText(/模拟发布被平台拒绝/)).toBeVisible();
+  await expect(card.getByText(/发布失败（.+），请检查连接后重试/)).toBeVisible();
   await assertNoHorizontalOverflow(page);
   await page.screenshot({ path: path.join(SHOT_DIR, "publish-failed-desktop.png"), fullPage: true });
 

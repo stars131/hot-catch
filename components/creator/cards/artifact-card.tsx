@@ -5,8 +5,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { ArtifactCard as ArtifactCardType } from "@/lib/creator/chat-protocol";
 import type { CardInvokeState } from "@/components/creator/cards/card-renderer";
-
-const PLATFORM_LABEL = { xiaohongshu: "小红书图文", douyin: "抖音脚本" } as const;
+import { useTranslations } from "next-intl";
 
 /**
  * 成果卡:展示已落库的 ContentRevision。
@@ -20,6 +19,8 @@ export function ArtifactCardView(props: {
   onOpen?: (card: ArtifactCardType) => void;
   onRefine?: (card: ArtifactCardType) => void;
 }) {
+  const t = useTranslations("Artifacts");
+  const tp = useTranslations("Platforms");
   function handleAction(actionId: string) {
     if (actionId === "artifact.open" && props.onOpen) {
       props.onOpen(props.card);
@@ -42,7 +43,7 @@ export function ArtifactCardView(props: {
         type="button"
         className="flex w-full items-start gap-2.5 rounded-lg text-left"
         onClick={() => handleAction("artifact.open")}
-        aria-label={`打开「${props.card.title}」编辑面板`}
+        aria-label={t("openAria", { title: props.card.title })}
         data-testid="artifact-card-open-area"
       >
         <FileText className="mt-0.5 h-4 w-4 shrink-0 text-[#C83B32]" />
@@ -56,8 +57,8 @@ export function ArtifactCardView(props: {
             </span>
           </span>
           <span className="mt-0.5 block text-xs text-[#746F67]">
-            {PLATFORM_LABEL[props.card.platform]}
-            {typeof props.card.score === "number" ? ` · 评分 ${props.card.score}/100` : ""}
+            {tp(props.card.platform)}
+            {typeof props.card.score === "number" ? ` · ${t("score", { score: props.card.score })}` : ""}
           </span>
           {props.card.preview ? (
             <span className="mt-1.5 line-clamp-3 block text-xs leading-5 text-[#67625A]">
@@ -85,12 +86,18 @@ export function ArtifactCardView(props: {
             {props.state.phase === "loading" ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : null}
-            {action.label}
+            {action.actionId === "artifact.open"
+              ? t("open")
+              : action.actionId === "artifact.refine"
+                ? t("refine")
+                : action.actionId === "publish.prepare"
+                  ? t("preparePublish")
+                  : action.label}
           </Button>
         ))}
         {props.state.phase === "failed" ? (
           <span className="self-center text-xs text-[#C83B32]">
-            {props.state.error ?? "执行失败,可重试"}
+            {props.state.error ?? t("failed")}
           </span>
         ) : null}
       </div>

@@ -3,13 +3,15 @@
  *
  * - 只接受 http/https;file、ftp、javascript、data 等协议一律拒绝。
  * - 移除已知跟踪参数;保留业务参数(如小红书 xsec_token 保留,防止链接失效)。
- * - 识别平台:小红书(含 xhslink 短链)、抖音(含 v.douyin 短链)、普通网页。
+ * - 识别国内两平台、五个国外平台及普通网页。
  */
+
+import type { PlatformId } from "@/lib/platforms/registry";
 
 export type DetectedUrl = {
   raw: string;
   normalized: string;
-  platform: "xiaohongshu" | "douyin" | "web";
+  platform: PlatformId | "web";
   kind: "content" | "account" | "webpage";
 };
 
@@ -105,6 +107,37 @@ export function detectUrl(raw: string): DetectedUrl {
       platform: "douyin",
       kind: isAccount ? "account" : "content",
     };
+  }
+  if (
+    hostname === "youtu.be" ||
+    hostname === "youtube.com" ||
+    hostname.endsWith(".youtube.com")
+  ) {
+    const isAccount = /^\/(?:@[^/]+|channel\/[^/]+|c\/[^/]+|user\/[^/]+)\/?$/i.test(
+      pathname,
+    );
+    return { raw, normalized, platform: "youtube", kind: isAccount ? "account" : "content" };
+  }
+  if (hostname === "tiktok.com" || hostname.endsWith(".tiktok.com")) {
+    const isAccount = /^\/@[^/]+\/?$/i.test(pathname);
+    return { raw, normalized, platform: "tiktok", kind: isAccount ? "account" : "content" };
+  }
+  if (hostname === "instagram.com" || hostname.endsWith(".instagram.com")) {
+    const isContent = /^\/(?:p|reel|reels|tv)\//i.test(pathname);
+    return { raw, normalized, platform: "instagram", kind: isContent ? "content" : "account" };
+  }
+  if (
+    hostname === "x.com" ||
+    hostname.endsWith(".x.com") ||
+    hostname === "twitter.com" ||
+    hostname.endsWith(".twitter.com")
+  ) {
+    const isContent = /\/status\/\d+/i.test(pathname);
+    return { raw, normalized, platform: "x", kind: isContent ? "content" : "account" };
+  }
+  if (hostname === "reddit.com" || hostname.endsWith(".reddit.com")) {
+    const isContent = /\/comments\//i.test(pathname);
+    return { raw, normalized, platform: "reddit", kind: isContent ? "content" : "account" };
   }
   return { raw, normalized, platform: "web", kind: "webpage" };
 }

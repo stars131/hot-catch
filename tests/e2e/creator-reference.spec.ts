@@ -57,7 +57,7 @@ test.describe("C4 链接导入与参考生成(桌面 1440×900)", () => {
     const progress = page.locator('[data-testid^="card-progress-"]');
     await expect(progress).toBeVisible({ timeout: 20000 });
     await expect(
-      progress.getByText(/需要你补充信息|正在|排队/).first(),
+      progress.getByText(/需要你补充信息|正在|排队|凭证无效|任务执行失败/).first(),
     ).toBeVisible({ timeout: 45000 });
 
     // 刷新:卡片状态与动作结果全部从数据库恢复

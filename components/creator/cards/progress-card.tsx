@@ -6,12 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { readApiJson } from "@/lib/api-client";
 import type { ProgressCard as ProgressCardType } from "@/lib/creator/chat-protocol";
+import { useLocale, useTranslations } from "next-intl";
 
 type JobView = {
   status: "queued" | "running" | "waiting_input" | "succeeded" | "failed" | "canceled";
   progress: number;
   stage: string | null;
   errorMessage: string | null;
+  messageKey: string | null;
 };
 
 const TERMINAL = ["succeeded", "failed", "canceled"];
@@ -22,6 +24,9 @@ export function ProgressCardView(props: {
   /** 任务由进行中转入终态时通知一次(刷新后已是终态的不触发) */
   onSettled?: () => void;
 }) {
+  const locale = useLocale();
+  const t = useTranslations("Tasks");
+  const te = useTranslations("Errors");
   const [job, setJob] = useState<JobView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [canceling, setCanceling] = useState(false);
@@ -54,7 +59,7 @@ export function ProgressCardView(props: {
         }
       } catch (error) {
         if (stopped) return;
-        setLoadError(error instanceof Error ? error.message : "任务状态读取失败");
+        setLoadError(locale === "zh-CN" && error instanceof Error ? error.message : t("loadFailed"));
       }
     }
     void poll();
@@ -62,7 +67,7 @@ export function ProgressCardView(props: {
       stopped = true;
       if (timer) window.clearTimeout(timer);
     };
-  }, [props.card.jobId]);
+  }, [locale, props.card.jobId, t]);
 
   async function cancel() {
     setCanceling(true);
@@ -72,7 +77,7 @@ export function ProgressCardView(props: {
       );
       setJob((current) => (current ? { ...current, status: "canceled" } : current));
     } catch (error) {
-      setLoadError(error instanceof Error ? error.message : "取消失败");
+      setLoadError(locale === "zh-CN" && error instanceof Error ? error.message : t("cancelFailed"));
     } finally {
       setCanceling(false);
     }
@@ -109,7 +114,7 @@ export function ProgressCardView(props: {
             disabled={canceling}
             onClick={() => void cancel()}
           >
-            <PauseCircle className="h-4 w-4" /> 取消
+            <PauseCircle className="h-4 w-4" /> {t("cancel")}
           </Button>
         ) : null}
       </div>
@@ -119,16 +124,24 @@ export function ProgressCardView(props: {
           <Progress value={job.progress} />
           <p className="mt-1.5 text-xs text-[#746F67]">
             {job.status === "waiting_input"
-              ? "需要你补充信息后才能继续。"
-              : (job.stage ?? "任务排队中…")}
+              ? t("waitingInput")
+              : locale === "en-US"
+                ? t("queued")
+                : (job.stage ?? t("queued"))}
           </p>
         </div>
       ) : null}
       {job?.status === "failed" ? (
-        <p className="mt-2 text-xs text-[#C83B32]">{job.errorMessage ?? "任务失败"}</p>
+        <p className="mt-2 text-xs text-[#C83B32]">
+          {job.messageKey?.startsWith("errors.")
+            ? te(job.messageKey.slice("errors.".length) as never)
+            : locale === "zh-CN"
+              ? (job.errorMessage ?? t("failed"))
+              : t("failed")}
+        </p>
       ) : null}
       {job?.status === "canceled" ? (
-        <p className="mt-2 text-xs text-[#746F67]">任务已取消。</p>
+        <p className="mt-2 text-xs text-[#746F67]">{t("canceled")}</p>
       ) : null}
       {loadError ? <p className="mt-2 text-xs text-[#C83B32]">{loadError}</p> : null}
     </div>

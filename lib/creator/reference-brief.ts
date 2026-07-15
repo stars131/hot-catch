@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { BenchmarkNote, Idea } from "@prisma/client";
+import { isPlatformId, type PlatformId } from "@/lib/platforms/registry";
 
 /**
  * ReferenceBrief:参考作品/网页的脱敏结构化摘要。
@@ -11,7 +12,7 @@ import type { BenchmarkNote, Idea } from "@prisma/client";
 export type ReferenceBrief = {
   version: 1;
   source: {
-    platform: "xiaohongshu" | "douyin" | "web";
+    platform: PlatformId | "web";
     sourceUrl: string | null;
     author: string | null;
     title: string | null;
@@ -136,6 +137,7 @@ export function buildBriefFromIdea(
       ? (idea.evidence as Record<string, unknown>)
       : {};
   const sourceUrl = typeof evidence.sourceUrl === "string" ? evidence.sourceUrl : null;
+  const platform = isPlatformId(evidence.platform) ? evidence.platform : "web";
   const body = sanitizeExternalText(
     typeof evidence.markdown === "string" ? evidence.markdown : idea.notes,
     6000,
@@ -144,7 +146,7 @@ export function buildBriefFromIdea(
   return {
     version: 1,
     source: {
-      platform: "web",
+      platform,
       sourceUrl,
       author: null,
       title: sanitizeExternalText(idea.title, 200) || null,
@@ -158,7 +160,12 @@ export function buildBriefFromIdea(
       .filter((item) => /\d/.test(item))
       .slice(0, 5)
       .map((item, index) => ({ label: `证据 ${index + 1}`, excerpt: item.slice(0, 200) })),
-    boundaries: [...BASE_BOUNDARIES],
+    boundaries: [
+      ...BASE_BOUNDARIES,
+      ...(platform === "reddit"
+        ? ["Reddit 公开内容仅用于当前用户本次推理，不进入训练集或跨用户资料库"]
+        : []),
+    ],
     provenance: {
       method,
       importedAt: new Date().toISOString(),

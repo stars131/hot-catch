@@ -11,9 +11,9 @@ const corePages = [
 ];
 
 test.describe("核心页面冒烟", () => {
-  test("首页重定向到小红书工作台", async ({ page }) => {
+  test("首页重定向到多平台创作入口", async ({ page }) => {
     await page.goto("/");
-    await expect(page).toHaveURL(/\/creator\/xiaohongshu/);
+    await expect(page).toHaveURL(/\/creator$/);
   });
 
   for (const { path, heading } of corePages) {

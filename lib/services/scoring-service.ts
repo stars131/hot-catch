@@ -1,12 +1,16 @@
-import { Prisma, type ContentKind, type Platform } from "@prisma/client";
+import { Prisma, type Platform } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/lib/errors";
-import { DEFAULT_RUBRIC_RULES, scoreContent } from "@/lib/scoring/score";
+import {
+  DEFAULT_RUBRIC_RULES,
+  scoreContent,
+  type ScoredContentKind,
+} from "@/lib/scoring/score";
 
 export async function ensureActiveRubric(
   userId: string,
   platform: Platform,
-  contentKind: ContentKind,
+  contentKind: ScoredContentKind,
 ) {
   const active = await prisma.scoringRubric.findFirst({
     where: { userId, platform, contentKind, status: "active" },
@@ -37,6 +41,16 @@ export async function scoreContentProject(userId: string, contentId: string) {
     include: { revisions: { orderBy: { revisionNumber: "desc" }, take: 1 } },
   });
   if (!content) throw new AppError("NOT_FOUND", "内容项目不存在。", 404);
+  if (
+    content.contentKind !== "xhs_graphic" &&
+    content.contentKind !== "douyin_video_script"
+  ) {
+    throw new AppError(
+      "SCORING_NOT_SUPPORTED",
+      "该平台首版使用平台检查清单，不执行国内平台评分。",
+      422,
+    );
+  }
   const latest = content.revisions[0];
   const rubric = await ensureActiveRubric(userId, content.platform, content.contentKind);
   const score = scoreContent({

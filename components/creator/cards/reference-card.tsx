@@ -13,6 +13,7 @@ import { readApiJson } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import type { ReferenceCard as ReferenceCardType } from "@/lib/creator/chat-protocol";
 import type { CardInvokeState } from "@/components/creator/cards/card-renderer";
+import { PLATFORM_DEFINITIONS } from "@/lib/platforms/registry";
 
 type JobView = {
   status: "queued" | "running" | "waiting_input" | "succeeded" | "failed" | "canceled";
@@ -23,7 +24,6 @@ type JobView = {
 };
 
 const TERMINAL = ["succeeded", "failed", "canceled"];
-const PLATFORM_LABEL = { xiaohongshu: "小红书", douyin: "抖音", web: "网页" } as const;
 
 /** 参考卡:按 jobId 轮询导入任务;importing/ready/needs_input/failed 四态,刷新可恢复。 */
 export function ReferenceCardView(props: {
@@ -111,7 +111,9 @@ export function ReferenceCardView(props: {
             <Link2 className="h-3.5 w-3.5 shrink-0 text-[#746F67]" />
             <p className="truncate text-sm font-medium">{host}</p>
             <span className="shrink-0 rounded bg-[#EDE9E0] px-1.5 py-0.5 text-[10px] text-[#67625A]">
-              {PLATFORM_LABEL[props.card.platform ?? "web"]}
+              {props.card.platform && props.card.platform !== "web"
+                ? PLATFORM_DEFINITIONS[props.card.platform].displayName
+                : "网页"}
             </span>
           </div>
           <p className="mt-1 text-xs leading-5 text-[#746F67]">

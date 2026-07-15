@@ -1,3 +1,5 @@
+import type { ContentKindId, ContentLocale, PlatformId } from "@/lib/platforms/registry";
+
 /**
  * star-chat/v1 会话卡片协议的稳定类型定义。
  *
@@ -48,7 +50,7 @@ export type ReferenceCard = {
   type: "reference";
   state: "importing" | "ready" | "needs_input" | "failed";
   sourceUrl: string;
-  platform?: "xiaohongshu" | "douyin" | "web";
+  platform?: PlatformId | "web";
   /** 关联导入任务;客户端轮询该任务驱动卡片状态 */
   jobId?: string;
   reference?: EntityRef;
@@ -76,8 +78,9 @@ export type ArtifactCard = {
   contentId: string;
   revisionId: string;
   revisionNumber: number;
-  platform: "xiaohongshu" | "douyin";
-  contentKind: "xhs_graphic" | "douyin_video_script";
+  platform: PlatformId;
+  contentKind: ContentKindId;
+  contentLocale?: ContentLocale;
   title: string;
   preview?: string;
   score?: number;
@@ -165,13 +168,13 @@ export type PublishReadinessCard = {
   /** 就绪结论基于的版本;确认时若已不是最新版会被安全拦截 */
   revisionId: string;
   revisionNumber: number;
-  platform: "xiaohongshu" | "douyin";
-  contentKind: "xhs_graphic" | "douyin_video_script";
+  platform: PlatformId;
+  contentKind: ContentKindId;
   title: string;
   /** 内容检查聚合结论 */
   state: "ready" | "warnings" | "blocked";
   /** AiToEarn 凭证的本地配置状态;connected 仅代表已配置,不代表真实可用 */
-  connection: "connected" | "missing" | "invalid";
+  connection: "connected" | "missing" | "invalid" | "not_applicable";
   items: Array<{
     key: string;
     label: string;
@@ -195,6 +198,7 @@ export const AGENT_COMMANDS = [
   "reference.add_to_style_profile",
   "content.create",
   "content.generate",
+  "content.generate_bundle",
   "content.propose_patch",
   "content.apply_patch",
   "content.score",

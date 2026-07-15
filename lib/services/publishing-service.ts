@@ -87,6 +87,7 @@ export async function preparePublishRecord(
     include: { revisions: { orderBy: { revisionNumber: "desc" } } },
   });
   if (!content) throw new AppError("NOT_FOUND", "内容项目不存在。", 404);
+  assertPublishablePlatform(content.platform);
   const revision = input.revisionId
     ? content.revisions.find((item) => item.id === input.revisionId)
     : content.revisions[0];
@@ -182,6 +183,7 @@ export async function submitPublishRecord(userId: string, localRecordId: string)
     where: { id: localRecordId, userId },
   });
   if (!local) throw new AppError("NOT_FOUND", "发布记录不存在。", 404);
+  assertPublishablePlatform(local.platform);
   if (!PUBLISH_SUBMITTABLE_STATUSES.has(local.status)) {
     return getPublishRecord(userId, local.id);
   }
@@ -208,6 +210,28 @@ export async function submitPublishRecord(userId: string, localRecordId: string)
     await markPublishRecordFailed(local.id, error);
   }
   return getPublishRecord(userId, local.id);
+}
+
+export async function assertContentPublishingSupported(
+  userId: string,
+  contentId: string,
+) {
+  const content = await prisma.generatedContent.findFirst({
+    where: { id: contentId, userId },
+    select: { platform: true },
+  });
+  if (!content) throw new AppError("NOT_FOUND", "内容项目不存在。", 404);
+  assertPublishablePlatform(content.platform);
+}
+
+function assertPublishablePlatform(platform: string) {
+  if (platform === "xiaohongshu" || platform === "douyin") return;
+  throw new AppError(
+    "PUBLISHING_NOT_SUPPORTED",
+    "该国外平台当前仅支持导出后手动发布，不支持账号连接或自动发布。",
+    422,
+    { messageKey: "errors.publishingNotSupported", platform },
+  );
 }
 
 /** 重试守卫：只有 failed 可重试；具体恢复逻辑复用 submitPublishRecord 的先查询语义。 */

@@ -1,6 +1,7 @@
 import { Prisma, JobType } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { prisma } from "@/lib/prisma";
+import { jobErrorMessageKey, safeJobErrorMessage } from "@/lib/jobs/error-messages";
 import { resolveSelectedSkills } from "@/lib/services/skill-service";
 import { AppError } from "@/lib/errors";
 import { CHAT_PROTOCOL, type ChatCard, type CardAction } from "@/lib/creator/chat-protocol";
@@ -110,6 +111,7 @@ async function buildImportReply(params: {
       input: {
         url: item.normalized,
         kind: item.kind,
+        platform: item.platform,
         conversationId: params.conversationId,
       },
       idempotencyKey: importIdempotencyKey(params.userId, item.normalized),
@@ -670,9 +672,36 @@ export async function invokeCardAction(params: {
 }
 
 export async function getAgentRunForUser(userId: string, runId: string) {
-  const run = await prisma.agentRun.findFirst({ where: { id: runId, userId } });
+  const run = await prisma.agentRun.findFirst({
+    where: { id: runId, userId },
+    include: {
+      jobs: {
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          status: true,
+          progress: true,
+          stage: true,
+          resultId: true,
+          errorCode: true,
+          errorMessage: true,
+          input: true,
+        },
+      },
+    },
+  });
   if (!run) throw new AppError("NOT_FOUND", "任务不存在,或不属于当前账号。", 404);
-  return run;
+  return {
+    ...run,
+    jobs: run.jobs.map((job) => {
+      const messageKey = jobErrorMessageKey(job.errorCode);
+      return {
+        ...job,
+        errorMessage: safeJobErrorMessage(messageKey),
+        messageKey,
+      };
+    }),
+  };
 }
 
 export async function cancelAgentRun(userId: string, runId: string) {

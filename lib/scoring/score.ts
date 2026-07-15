@@ -1,4 +1,4 @@
-import type { ContentKind } from "@prisma/client";
+export type ScoredContentKind = "xhs_graphic" | "douyin_video_script";
 
 export type ScoreDimension = {
   key: string;
@@ -16,7 +16,7 @@ export type ContentScore = {
 };
 
 type ScoreInput = {
-  kind: ContentKind;
+  kind: ScoredContentKind;
   title?: string | null;
   bodyText?: string | null;
   structuredContent?: unknown;

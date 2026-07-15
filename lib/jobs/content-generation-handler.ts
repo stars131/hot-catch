@@ -4,31 +4,38 @@ import { registerJobHandler } from "@/lib/jobs/handlers";
 import type { JobHandler } from "@/lib/jobs/types";
 import { prisma } from "@/lib/prisma";
 import { createLlmProvider } from "@/lib/providers/factory";
-import {
-  douyinVideoScriptOutputSchema,
-  xhsGraphicOutputSchema,
-} from "@/lib/content/schemas";
 import { createContentRevision } from "@/lib/services/content-project-service";
-import { toDouyinMarkdown, toXhsMarkdown } from "@/lib/content/markdown";
 import { scoreContentProject } from "@/lib/services/scoring-service";
 import { CHAT_PROTOCOL } from "@/lib/creator/chat-protocol";
 import { chatMessageMetadataV1Schema } from "@/lib/creator/chat-schemas";
-import {
-  REFERENCE_GUARD_INSTRUCTION,
-  type ReferenceBrief,
-} from "@/lib/creator/reference-brief";
+import type { ReferenceBrief } from "@/lib/creator/reference-brief";
 import {
   resolveConversationSkills,
   skillSnapshotsJson,
 } from "@/lib/services/skill-service";
+import {
+  getPlatformServerDefinition,
+  type NormalizedGeneratedContent,
+} from "@/lib/platforms/server-registry";
+import {
+  isContentKindId,
+  isContentLocale,
+  isUiLocale,
+  type ContentKindId,
+  type ContentLocale,
+  type PlatformId,
+  type UiLocale,
+} from "@/lib/platforms/registry";
 
 const contentGenerationHandler: JobHandler = async (payload, reportProgress) => {
   const input = payload.input as {
     contentId?: string;
     conversationId?: string;
     skillIds?: string[];
+    uiLocale?: string;
   };
   if (!input.contentId) throw new Error("contentId is required");
+
   const content = await prisma.generatedContent.findFirst({
     where: { id: input.contentId, userId: payload.userId },
     include: {
@@ -38,16 +45,23 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
     },
   });
   if (!content) throw new Error("内容项目不存在或不属于当前用户。");
+  if (!isContentKindId(content.contentKind)) {
+    throw new Error(`Unsupported content kind: ${content.contentKind}`);
+  }
   if (content.styleProfile && content.styleProfile.status !== "approved") {
     return {
       finalStatus: "waiting_input",
-      output: { reason: "STYLE_PROFILE_NOT_APPROVED", message: "风格画像尚未人工确认。" },
+      output: {
+        reason: "STYLE_PROFILE_NOT_APPROVED",
+        message: "风格画像尚未人工确认。",
+      },
     };
   }
 
+  const conversationId = input.conversationId ?? content.conversationId;
   const skillSelection = await resolveConversationSkills({
     userId: payload.userId,
-    conversationId: input.conversationId ?? content.conversationId,
+    conversationId,
     skillIds: input.skillIds ?? content.selectedSkillIds,
   });
 
@@ -55,21 +69,27 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
   try {
     provider = await createLlmProvider(payload.userId);
   } catch (error) {
-    if (isAppError(error) && error.code === "CREDENTIAL_NOT_CONFIGURED") {
+    if (
+      isAppError(error) &&
+      (error.code === "CREDENTIAL_NOT_CONFIGURED" ||
+        error.code === "CREDENTIAL_INVALID")
+    ) {
       return {
         finalStatus: "waiting_input",
-        output: { reason: "LLM_CREDENTIAL_REQUIRED", message: "请先配置并选择默认模型。" },
+        output: {
+          reason: "LLM_CREDENTIAL_REQUIRED",
+          message: "请先配置并选择一个真实可用的默认模型。",
+        },
       };
     }
     throw error;
   }
 
-  await reportProgress(20, "整理选题与风格证据");
-  // 参考材料只读取脱敏 Brief(ContentReference.snapshot),不读取供应商 rawData
+  await reportProgress(20, "整理选题、参考资料与 Skill");
   const references = await prisma.contentReference.findMany({
     where: { contentId: content.id, userId: payload.userId },
     select: { snapshot: true },
-    take: 5,
+    take: 10,
   });
   const referenceBriefs = references
     .map((item) => item.snapshot as unknown as ReferenceBrief)
@@ -77,7 +97,12 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
 
   const context = {
     idea: content.idea
-      ? { title: content.idea.title, angle: content.idea.angle, audience: content.idea.audience, notes: content.idea.notes }
+      ? {
+          title: content.idea.title,
+          angle: content.idea.angle,
+          audience: content.idea.audience,
+          notes: content.idea.notes,
+        }
       : { title: content.title, notes: content.inputText },
     persona: content.persona,
     styleProfile: content.styleProfile
@@ -99,140 +124,103 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
     references: referenceBriefs,
   };
 
+  const targetLocale: ContentLocale = isContentLocale(content.contentLocale)
+    ? content.contentLocale
+    : "zh-CN";
+  const uiLocale: UiLocale = isUiLocale(input.uiLocale) ? input.uiLocale : "zh-CN";
+  const definition = getPlatformServerDefinition(content.contentKind);
+  const prompt = definition.buildPrompt({
+    context,
+    targetLocale,
+    uiLocale,
+    skillInstruction: skillSelection.promptInstruction,
+  });
+
   await reportProgress(45, "生成结构化初稿");
   try {
-    if (content.contentKind === "xhs_graphic") {
-      const generated = await provider.generateStructured({
-        system:
-          "你是小红书图文编辑。根据选题、人设和已审核风格画像生成原创内容,不冒充参考创作者,不照抄证据。只返回符合字段要求的 JSON。" +
-          REFERENCE_GUARD_INSTRUCTION +
-          (skillSelection.promptInstruction ? `\n\n${skillSelection.promptInstruction}` : ""),
-        prompt: `${JSON.stringify(context)}\n生成标题候选、封面文案、逐页图文、完整正文、标签、互动收尾和风险说明。`,
-        schema: xhsGraphicOutputSchema,
-      });
-      const revision = await createContentRevision(
-        payload.userId,
-        content.id,
-        {
-          source: "generated",
-          title: generated.title,
-          bodyText: generated.bodyText,
-          structuredContent: generated,
-          fullMarkdown: toXhsMarkdown(generated),
-        },
-        {
-          originJobId: payload.databaseJobId,
-          provenance: {
-            promptVersion: "content-xhs-v1",
-            provider: provider.name,
-            model: provider.model,
-            skills: skillSelection.snapshots,
-          } as unknown as Prisma.InputJsonValue,
-        },
-      );
-      await prisma.generatedContent.update({
-        where: { id: content.id },
-        data: {
-          generatedTitleOptions: generated.titleOptions,
-          coverTextOptions: generated.coverTextOptions,
-          pageStructure: generated.pages,
-          tags: generated.tags,
-          interactionEnding: generated.interactionEnding,
-          riskNotes: generated.riskNotes.join("\n"),
-          modelName: `${provider.name}/${provider.model}`,
-          promptVersion: "content-xhs-v1",
-          selectedSkillIds: skillSelection.ids,
-          skillSnapshots: skillSelection.snapshots.length
-            ? skillSnapshotsJson(skillSelection.snapshots)
-            : Prisma.JsonNull,
-        },
-      });
-      await reportProgress(85, "执行发布前评分");
-      const scoring = await scoreContentProject(payload.userId, content.id);
-      await appendArtifactMessage({
-        userId: payload.userId,
-        conversationId: input.conversationId ?? content.conversationId,
-        jobId: payload.databaseJobId,
-        contentId: content.id,
-        revisionId: revision.id,
-        revisionNumber: revision.revisionNumber,
-        platform: "xiaohongshu",
-        contentKind: "xhs_graphic",
-        title: generated.title,
-        preview: generated.bodyText.slice(0, 200),
-        score: scoring.score.total,
-      });
-      return {
-        resultType: "contentRevision",
-        resultId: revision.id,
-        output: { contentId: content.id, score: scoring.score.total },
-      };
-    }
-
     const generated = await provider.generateStructured({
-      system:
-        "你是抖音短视频编导。生成精确到秒且连续的分镜脚本,不自动成片,不冒充参考创作者。每镜必须包含口播、画面、字幕、镜头、转场、音乐和风险字段,只返回 JSON。" +
-        REFERENCE_GUARD_INSTRUCTION +
-        (skillSelection.promptInstruction ? `\n\n${skillSelection.promptInstruction}` : ""),
-      prompt: `${JSON.stringify(context)}\n生成 10–180 秒的原创短视频脚本，第一镜从 0 秒开始，最后一镜结束时间等于总时长。`,
-      schema: douyinVideoScriptOutputSchema,
+      system: prompt.system,
+      prompt: prompt.prompt,
+      schema: definition.schema,
     });
+    const parsed = definition.schema.parse(generated);
+    const normalized = definition.normalize(parsed);
+
     const revision = await createContentRevision(
       payload.userId,
       content.id,
       {
         source: "generated",
-        title: generated.title,
-        bodyText: generated.caption,
-        structuredContent: generated,
-        fullMarkdown: toDouyinMarkdown(generated),
+        title: normalized.title,
+        bodyText: normalized.bodyText,
+        structuredContent: parsed,
+        fullMarkdown: normalized.fullMarkdown,
       },
       {
         originJobId: payload.databaseJobId,
         provenance: {
-          promptVersion: "content-douyin-v1",
+          promptVersion: definition.promptVersion,
           provider: provider.name,
           model: provider.model,
+          targetLocale,
           skills: skillSelection.snapshots,
         } as unknown as Prisma.InputJsonValue,
       },
     );
+
     await prisma.generatedContent.update({
       where: { id: content.id },
       data: {
-        scriptSpec: generated,
-        tags: generated.tags,
-        riskNotes: generated.riskNotes.join("\n"),
+        ...legacyFields(content.contentKind, parsed),
+        scriptSpec: toJson(parsed),
+        tags: normalized.tags,
+        riskNotes: normalized.riskNotes.join("\n"),
         modelName: `${provider.name}/${provider.model}`,
-        promptVersion: "content-douyin-v1",
+        promptVersion: definition.promptVersion,
         selectedSkillIds: skillSelection.ids,
         skillSnapshots: skillSelection.snapshots.length
           ? skillSnapshotsJson(skillSelection.snapshots)
           : Prisma.JsonNull,
       },
     });
-    await reportProgress(85, "执行发布前评分");
-    const scoring = await scoreContentProject(payload.userId, content.id);
+
+    const score = await scoreIfSupported(
+      payload.userId,
+      content.id,
+      content.contentKind,
+      reportProgress,
+    );
     await appendArtifactMessage({
       userId: payload.userId,
-      conversationId: input.conversationId ?? content.conversationId,
+      conversationId,
       jobId: payload.databaseJobId,
       contentId: content.id,
       revisionId: revision.id,
       revisionNumber: revision.revisionNumber,
-      platform: "douyin",
-      contentKind: "douyin_video_script",
-      title: generated.title,
-      preview: generated.caption.slice(0, 200),
-      score: scoring.score.total,
+      platform: definition.platform,
+      contentKind: content.contentKind,
+      contentLocale: targetLocale,
+      normalized,
+      score,
     });
+
     return {
       resultType: "contentRevision",
       resultId: revision.id,
-      output: { contentId: content.id, score: scoring.score.total },
+      output: {
+        contentId: content.id,
+        platform: definition.platform,
+        contentLocale: targetLocale,
+        revisionId: revision.id,
+        ...(score === undefined ? {} : { score }),
+      },
     };
   } catch (error) {
-    if (isAppError(error) && error.code === "AI_GENERATION_FAILED" && error.statusCode === 422) {
+    if (
+      isAppError(error) &&
+      error.code === "AI_GENERATION_FAILED" &&
+      error.statusCode === 422
+    ) {
       return {
         finalStatus: "waiting_input",
         output: { reason: "STRUCTURED_OUTPUT_INVALID", message: error.message },
@@ -242,7 +230,38 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
   }
 };
 
-/** 生成成功后把 ArtifactCard 写回会话;按 jobId 幂等,Worker 重试不重复发消息。 */
+function legacyFields(
+  contentKind: ContentKindId,
+  generated: unknown,
+): Prisma.GeneratedContentUpdateInput {
+  const value = asRecord(generated);
+  if (contentKind === "xhs_graphic") {
+    return {
+      generatedTitleOptions: toJson(value.titleOptions),
+      coverTextOptions: toJson(value.coverTextOptions),
+      pageStructure: toJson(value.pages),
+      interactionEnding:
+        typeof value.interactionEnding === "string" ? value.interactionEnding : null,
+    };
+  }
+  return {};
+}
+
+async function scoreIfSupported(
+  userId: string,
+  contentId: string,
+  contentKind: ContentKindId,
+  reportProgress: (progress: number, stage: string) => Promise<void>,
+): Promise<number | undefined> {
+  if (contentKind !== "xhs_graphic" && contentKind !== "douyin_video_script") {
+    await reportProgress(85, "执行平台格式检查");
+    return undefined;
+  }
+  await reportProgress(85, "执行发布前评分");
+  const scoring = await scoreContentProject(userId, contentId);
+  return scoring.score.total;
+}
+
 async function appendArtifactMessage(params: {
   userId: string;
   conversationId: string | null;
@@ -250,17 +269,18 @@ async function appendArtifactMessage(params: {
   contentId: string;
   revisionId: string;
   revisionNumber: number;
-  platform: "xiaohongshu" | "douyin";
-  contentKind: "xhs_graphic" | "douyin_video_script";
-  title: string;
-  preview: string;
-  score: number;
+  platform: PlatformId;
+  contentKind: ContentKindId;
+  contentLocale: ContentLocale;
+  normalized: NormalizedGeneratedContent;
+  score?: number;
 }) {
   if (!params.conversationId) return;
   const conversation = await prisma.conversation.findFirst({
     where: { id: params.conversationId, userId: params.userId },
   });
   if (!conversation) return;
+
   const metadata = chatMessageMetadataV1Schema.parse({
     protocol: CHAT_PROTOCOL,
     cards: [
@@ -273,23 +293,43 @@ async function appendArtifactMessage(params: {
         revisionNumber: params.revisionNumber,
         platform: params.platform,
         contentKind: params.contentKind,
-        title: params.title,
-        preview: params.preview,
+        contentLocale: params.contentLocale,
+        title: params.normalized.title,
+        preview: params.normalized.bodyText.slice(0, 200),
         score: params.score,
         actions: [
-          { actionId: "artifact.open", label: "打开编辑", appearance: "primary", repeatable: true },
-          { actionId: "artifact.refine", label: "继续优化", repeatable: true },
-          { actionId: "publish.prepare", label: "准备发布", repeatable: true },
+          {
+            actionId: "artifact.open",
+            label: "打开编辑",
+            appearance: "primary",
+            repeatable: true,
+          },
+          {
+            actionId: "artifact.refine",
+            label: "继续优化",
+            repeatable: true,
+          },
+          ...(params.platform === "xiaohongshu" || params.platform === "douyin"
+            ? [
+                {
+                  actionId: "publish.prepare",
+                  label: "准备发布",
+                  repeatable: true,
+                },
+              ]
+            : []),
         ],
       },
     ],
   });
+  const scoreSuffix =
+    typeof params.score === "number" ? `，评分 ${params.score}/100` : "";
   try {
     await prisma.message.create({
       data: {
         conversationId: params.conversationId,
         role: "assistant",
-        content: `原创稿已生成:「${params.title}」(v${params.revisionNumber},评分 ${params.score}/100)。`,
+        content: `原创稿已生成：「${params.normalized.title}」（v${params.revisionNumber}${scoreSuffix}）。`,
         status: "complete",
         clientMessageId: `artifact:${params.jobId}`,
         metadata: metadata as unknown as Prisma.InputJsonValue,
@@ -306,6 +346,17 @@ async function appendArtifactMessage(params: {
       throw error;
     }
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function toJson(value: unknown): Prisma.InputJsonValue | undefined {
+  if (value === undefined) return undefined;
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
 
 registerJobHandler("content.generate", contentGenerationHandler);

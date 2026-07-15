@@ -1,22 +1,35 @@
-import { ContentKind, Platform } from "@prisma/client";
 import { z } from "zod";
+import {
+  CONTENT_KIND_IDS,
+  CONTENT_LOCALES,
+  PLATFORM_IDS,
+  isContentKindId,
+  isPlatformId,
+  platformSupportsContentKind,
+} from "@/lib/platforms/registry";
 
 export const createContentProjectSchema = z
   .object({
     ideaId: z.string().cuid().optional(),
     personaId: z.string().cuid().optional(),
     styleProfileId: z.string().cuid().optional(),
-    platform: z.nativeEnum(Platform),
-    contentKind: z.nativeEnum(ContentKind),
+    platform: z.enum(PLATFORM_IDS),
+    contentKind: z.enum(CONTENT_KIND_IDS),
+    contentLocale: z.enum(CONTENT_LOCALES).default("zh-CN"),
     title: z.string().trim().max(200).optional(),
     inputText: z.string().trim().max(12000).optional(),
   })
   .superRefine((value, ctx) => {
-    if (value.platform === "xiaohongshu" && value.contentKind !== "xhs_graphic") {
-      ctx.addIssue({ code: "custom", message: "小红书项目必须使用图文类型。" });
-    }
-    if (value.platform === "douyin" && value.contentKind !== "douyin_video_script") {
-      ctx.addIssue({ code: "custom", message: "抖音项目必须使用视频脚本类型。" });
+    if (
+      isPlatformId(value.platform) &&
+      isContentKindId(value.contentKind) &&
+      !platformSupportsContentKind(value.platform, value.contentKind)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["contentKind"],
+        message: "平台与内容格式不匹配。",
+      });
     }
   });
 

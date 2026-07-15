@@ -44,6 +44,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { readApiJson } from "@/lib/api-client";
 import type { SkillCatalogItem } from "@/lib/skills/catalog";
+import { useLocale, useTranslations } from "next-intl";
 
 type SkillForm = {
   name: string;
@@ -54,6 +55,9 @@ type SkillForm = {
 const EMPTY_FORM: SkillForm = { name: "", description: "", instructions: "" };
 
 export default function SkillSettingsPage() {
+  const locale = useLocale();
+  const t = useTranslations("Skills");
+  const common = useTranslations("Common");
   const [skills, setSkills] = useState<SkillCatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -68,11 +72,11 @@ export default function SkillSettingsPage() {
       );
       setSkills(data.skills);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Skill 加载失败");
+      toast.error(locale === "zh-CN" && error instanceof Error ? error.message : "Skill loading failed");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [locale]);
 
   useEffect(() => {
     void load();
@@ -105,7 +109,7 @@ export default function SkillSettingsPage() {
 
   async function saveSkill() {
     if (!form.name.trim() || !form.description.trim() || !form.instructions.trim()) {
-      toast.error("请完整填写名称、用途和执行说明");
+      toast.error(t("validation"));
       return;
     }
     setBusyId(editingId ?? "create");
@@ -117,11 +121,11 @@ export default function SkillSettingsPage() {
           body: JSON.stringify(editingId ? { id: editingId, ...form } : form),
         }),
       );
-      toast.success(editingId ? "Skill 已更新" : "Skill 已创建");
+      toast.success(editingId ? t("updated") : t("created"));
       setDialogOpen(false);
       await load();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "保存失败");
+      toast.error(locale === "zh-CN" && error instanceof Error ? error.message : "Save failed");
     } finally {
       setBusyId(null);
     }
@@ -137,17 +141,17 @@ export default function SkillSettingsPage() {
           body: JSON.stringify({ id: skill.id, enabled: !skill.enabled }),
         }),
       );
-      toast.success(skill.enabled ? "Skill 已停用" : "Skill 已启用");
+      toast.success(skill.enabled ? t("disabled") : t("enabled"));
       await load();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "状态更新失败");
+      toast.error(locale === "zh-CN" && error instanceof Error ? error.message : "Status update failed");
     } finally {
       setBusyId(null);
     }
   }
 
   async function deleteSkill(skill: SkillCatalogItem) {
-    if (!window.confirm(`确定删除“${skill.name}”吗？已经保存的任务快照不会被删除。`)) {
+    if (!window.confirm(t("confirmDelete", { name: skill.name }))) {
       return;
     }
     setBusyId(skill.id);
@@ -157,10 +161,10 @@ export default function SkillSettingsPage() {
           method: "DELETE",
         }),
       );
-      toast.success("Skill 已删除");
+      toast.success(t("deleted"));
       await load();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "删除失败");
+      toast.error(locale === "zh-CN" && error instanceof Error ? error.message : "Delete failed");
     } finally {
       setBusyId(null);
     }
@@ -168,17 +172,17 @@ export default function SkillSettingsPage() {
 
   return (
     <AppShell
-      title="Skill 设置"
-      description="管理可复用的创作方法，并在每次创作时显式选择。"
+      title={t("title")}
+      description={t("description")}
       actions={
         <div className="flex items-center gap-2">
           <Button asChild variant="outline" size="sm">
             <Link href="/settings/connections">
-              <Settings data-icon="inline-start" /> 连接设置
+              <Settings data-icon="inline-start" /> {t("connections")}
             </Link>
           </Button>
           <Button size="sm" onClick={openCreate}>
-            <Plus data-icon="inline-start" /> 新建 Skill
+            <Plus data-icon="inline-start" /> {t("new")}
           </Button>
         </div>
       }
@@ -186,15 +190,15 @@ export default function SkillSettingsPage() {
       <div className="flex flex-col gap-8">
         <Alert>
           <Sparkles aria-hidden="true" />
-          <AlertTitle>Skill 会在生成前组合成补充创作要求</AlertTitle>
+          <AlertTitle>{t("noticeTitle")}</AlertTitle>
           <AlertDescription>
-            当前只支持说明型 Skill，不执行上传代码或任意远程地址。一次创作最多选择 8 个；任务会保存当时的 Skill 快照，后续修改不会改变历史记录。
+            {t("noticeBody")}
           </AlertDescription>
         </Alert>
 
         <SkillSection
-          title="内置 Skill"
-          description="由系统维护，可启用或停用；支持整篇创作的 Skill 会出现在创作输入框的多选列表中。"
+          title={t("builtin")}
+          description={t("builtinDescription")}
           loading={loading}
           skills={builtinSkills}
           busyId={busyId}
@@ -204,8 +208,8 @@ export default function SkillSettingsPage() {
         />
 
         <SkillSection
-          title="我的 Skill"
-          description="把你的写作方法、固定结构、品牌语气或审核清单保存下来。"
+          title={t("custom")}
+          description={t("customDescription")}
           loading={loading}
           skills={customSkills}
           busyId={busyId}
@@ -219,58 +223,58 @@ export default function SkillSettingsPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>{editingId ? "编辑 Skill" : "新建 Skill"}</DialogTitle>
+            <DialogTitle>{editingId ? t("edit") : t("new")}</DialogTitle>
             <DialogDescription>
-              写清楚适用场景和执行要求。创作时可以同时选择多个 Skill。
+              {t("formDescription")}
             </DialogDescription>
           </DialogHeader>
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor="skill-name">名称</FieldLabel>
+              <FieldLabel htmlFor="skill-name">{t("name")}</FieldLabel>
               <Input
                 id="skill-name"
                 value={form.name}
                 onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-                placeholder="例如：第一人称经验分享"
+                placeholder={t("namePlaceholder")}
                 maxLength={80}
               />
             </Field>
             <Field>
-              <FieldLabel htmlFor="skill-description">用途说明</FieldLabel>
+              <FieldLabel htmlFor="skill-description">{t("purpose")}</FieldLabel>
               <Input
                 id="skill-description"
                 value={form.description}
                 onChange={(event) =>
                   setForm((current) => ({ ...current, description: event.target.value }))
                 }
-                placeholder="什么时候应该选择它"
+                placeholder={t("purposePlaceholder")}
                 maxLength={300}
               />
             </Field>
             <Field>
-              <FieldLabel htmlFor="skill-instructions">执行说明</FieldLabel>
+              <FieldLabel htmlFor="skill-instructions">{t("instructions")}</FieldLabel>
               <Textarea
                 id="skill-instructions"
                 value={form.instructions}
                 onChange={(event) =>
                   setForm((current) => ({ ...current, instructions: event.target.value }))
                 }
-                placeholder="用第一人称写作；先给具体场景，再总结方法；不要使用说教口吻……"
+                placeholder={t("instructionsPlaceholder")}
                 className="min-h-44"
                 maxLength={4000}
               />
               <FieldDescription>
-                只写创作规则，不要填写 API Key、密码或其他敏感信息。
+                {t("secretWarning")}
               </FieldDescription>
             </Field>
           </FieldGroup>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              取消
+              {common("cancel")}
             </Button>
             <Button onClick={() => void saveSkill()} disabled={busyId !== null}>
               {busyId ? <Spinner data-icon="inline-start" /> : <Check data-icon="inline-start" />}
-              保存 Skill
+              {t("save")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -290,6 +294,7 @@ function SkillSection(props: {
   onDelete: (skill: SkillCatalogItem) => Promise<void>;
   emptyAction?: () => void;
 }) {
+  const t = useTranslations("Skills");
   return (
     <section className="flex flex-col gap-4" aria-labelledby={`${props.title}-heading`}>
       <div>
@@ -326,13 +331,13 @@ function SkillSection(props: {
       ) : (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">还没有自定义 Skill</CardTitle>
-            <CardDescription>先把一种你经常重复说明的创作方法保存下来。</CardDescription>
+            <CardTitle className="text-base">{t("emptyTitle")}</CardTitle>
+            <CardDescription>{t("emptyDescription")}</CardDescription>
           </CardHeader>
           {props.emptyAction ? (
             <CardFooter>
               <Button onClick={props.emptyAction}>
-                <Plus data-icon="inline-start" /> 新建第一个 Skill
+                <Plus data-icon="inline-start" /> {t("first")}
               </Button>
             </CardFooter>
           ) : null}
@@ -350,6 +355,11 @@ function SkillCard(props: {
   onDelete: (skill: SkillCatalogItem) => Promise<void>;
 }) {
   const { skill } = props;
+  const locale = useLocale();
+  const t = useTranslations("Skills");
+  const tb = useTranslations("BuiltinSkills");
+  const common = useTranslations("Common");
+  const display = localizedBuiltinSkill(skill, locale, tb);
   return (
     <Card className={skill.enabled ? undefined : "opacity-70"} data-testid={`skill-card-${skill.id}`}>
       <CardHeader>
@@ -357,33 +367,37 @@ function SkillCard(props: {
           <div className="min-w-0">
             <CardTitle className="flex items-center gap-2 text-base">
               <Bot className="shrink-0 text-primary" />
-              <span className="truncate">{skill.name}</span>
+              <span className="truncate">{display.name}</span>
             </CardTitle>
-            <CardDescription className="mt-1.5">{skill.description}</CardDescription>
+            <CardDescription className="mt-1.5">{display.description}</CardDescription>
           </div>
           <Badge
             variant={skill.enabled ? "secondary" : "outline"}
             className="shrink-0 whitespace-nowrap"
           >
-            {skill.enabled ? "已启用" : "已停用"}
+            {skill.enabled ? t("enabled") : t("disabled")}
           </Badge>
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <div className="flex flex-wrap gap-1.5">
-          <Badge variant="outline">{skill.source === "builtin" ? "内置" : "自定义"}</Badge>
+          <Badge variant="outline">
+            {skill.source === "builtin" ? t("builtinBadge") : t("customBadge")}
+          </Badge>
           {skill.scopes.map((scope) => (
             <Badge key={scope} variant="outline">
-              {scope === "generation" ? "整篇创作" : "局部修改"}
+              {scope === "generation" ? t("generationScope") : t("patchScope")}
             </Badge>
           ))}
         </div>
         {skill.instructions ? (
           <p className="line-clamp-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
-            {skill.instructions}
+            {locale === "en-US" && skill.source === "builtin"
+              ? display.description
+              : skill.instructions}
           </p>
         ) : (
-          <p className="text-sm text-muted-foreground">此 Skill 只用于修改已选中的内容区块。</p>
+          <p className="text-sm text-muted-foreground">{t("patchOnly")}</p>
         )}
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2">
@@ -394,12 +408,12 @@ function SkillCard(props: {
           disabled={props.busy}
         >
           {props.busy ? <Spinner data-icon="inline-start" /> : null}
-          {skill.enabled ? "停用" : "启用"}
+          {skill.enabled ? t("disable") : t("enable")}
         </Button>
         {skill.source === "custom" ? (
           <>
             <Button variant="ghost" size="sm" onClick={() => props.onEdit(skill)}>
-              <Edit3 data-icon="inline-start" /> 编辑
+              <Edit3 data-icon="inline-start" /> {t("edit")}
             </Button>
             <Button
               variant="ghost"
@@ -407,11 +421,32 @@ function SkillCard(props: {
               onClick={() => void props.onDelete(skill)}
               disabled={props.busy}
             >
-              <Trash2 data-icon="inline-start" /> 删除
+              <Trash2 data-icon="inline-start" /> {common("delete")}
             </Button>
           </>
         ) : null}
       </CardFooter>
     </Card>
   );
+}
+
+function localizedBuiltinSkill(
+  skill: SkillCatalogItem,
+  locale: string,
+  translate: (key: never) => string,
+) {
+  if (locale !== "en-US" || skill.source !== "builtin") {
+    return { name: skill.name, description: skill.description };
+  }
+  const keys: Record<string, [string, string]> = {
+    "builtin.rewrite-section": ["rewriteName", "rewriteDescription"],
+    "builtin.expand-hook": ["hookName", "hookDescription"],
+    "builtin.compress-text": ["compressName", "compressDescription"],
+    "builtin.improve-visual": ["visualName", "visualDescription"],
+    "builtin.risk-check": ["riskName", "riskDescription"],
+  };
+  const pair = keys[skill.id];
+  return pair
+    ? { name: translate(pair[0] as never), description: translate(pair[1] as never) }
+    : { name: skill.name, description: skill.description };
 }

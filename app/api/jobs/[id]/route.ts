@@ -2,6 +2,7 @@ import { requireUser } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { fail, ok } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
+import { jobErrorMessageKey, safeJobErrorMessage } from "@/lib/jobs/error-messages";
 
 export const runtime = "nodejs";
 
@@ -32,7 +33,14 @@ export async function GET(_request: Request, context: RouteContext) {
       },
     });
     if (!job) throw new AppError("NOT_FOUND", "任务不存在。", 404);
-    return ok({ job });
+    const messageKey = jobErrorMessageKey(job.errorCode);
+    return ok({
+      job: {
+        ...job,
+        errorMessage: safeJobErrorMessage(messageKey),
+        messageKey,
+      },
+    });
   } catch (error) {
     return fail(error);
   }

@@ -31,6 +31,8 @@ const envSchema = z.object({
   XHS_FETCH_PROVIDER: z.enum(["mock", "third_party", "public_page"]).default("mock"),
   XHS_THIRD_PARTY_API_KEY: z.string().optional().default(""),
   XHS_THIRD_PARTY_BASE_URL: z.string().optional().default(""),
+  FOREIGN_PLATFORM_CREATION_ENABLED: z.enum(["0", "1"]).default("0"),
+  UI_I18N_ENABLED: z.enum(["0", "1"]).default("1"),
   MAX_INPUT_LENGTH: z.coerce.number().int().positive().default(12000),
   MAX_BENCHMARK_ACCOUNTS_PER_ANALYSIS: z.coerce.number().int().positive().default(5),
   XHS_FETCH_CACHE_HOURS: z.coerce.number().int().nonnegative().default(24),
@@ -46,6 +48,14 @@ export function isDeepSeekConfigured(): boolean {
 
 export function isDevelopmentAuthBypassEnabled(): boolean {
   return env.NODE_ENV !== "production" && env.DEV_AUTH_BYPASS === "1";
+}
+
+export function isForeignPlatformCreationEnabled(): boolean {
+  return env.FOREIGN_PLATFORM_CREATION_ENABLED === "1";
+}
+
+export function isUiI18nEnabled(): boolean {
+  return env.UI_I18N_ENABLED === "1";
 }
 
 export type PublishProviderMode = "mock" | "real";

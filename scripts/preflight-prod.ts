@@ -8,6 +8,7 @@
  * - 数据库/Redis 连接串缺失。
  * - 凭证加密密钥格式不合法(必须 32 字节:hex64 或 base64)。
  * - 发布被强制成 mock(生产禁止用 mock 掩盖真实发布错误)。
+ * - C14 国外平台与界面多语言开关没有显式声明。
  *
  * 刻意不校验任何供应商 API Key:它们是每位用户在连接设置中保存的加密 DB 凭证,
  * 不放进环境变量,也不该出现在部署 env 里。
@@ -198,6 +199,21 @@ function main(): void {
       "fail",
       "未设置 AUTH_RESEND_KEY,邀请制魔法链接登录将无法使用。",
     );
+  }
+
+  // 11–12. C14 分阶段开关必须显式声明。0 代表 C14A 兼容态,1 代表 C14B 已开放。
+  for (const name of [
+    "FOREIGN_PLATFORM_CREATION_ENABLED",
+    "UI_I18N_ENABLED",
+  ] as const) {
+    const value = env[name];
+    if (value === "1") {
+      record(name, "pass", "C14 功能已开启。");
+    } else if (value === "0") {
+      record(name, "warn", "C14A 兼容态:功能开关仍关闭。进入 C14B 前需改为 1 并重新预检。");
+    } else {
+      record(name, "fail", "必须显式设置为 0（C14A）或 1（C14B）。");
+    }
   }
 
   const symbol: Record<CheckStatus, string> = {

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import {
   ExternalLink as ExternalLinkIcon,
   Link2 as Link2Icon,
@@ -123,6 +124,8 @@ const PROVIDER_BY_ID = new Map(
 );
 
 export default function ConnectionsPage() {
+  const locale = useLocale();
+  const t = useTranslations("Connections");
   const [summaries, setSummaries] = useState<CredentialSummaryView[]>([]);
   const [defaultLlmProvider, setDefaultLlmProvider] =
     useState<LlmProviderId | null>(null);
@@ -157,16 +160,14 @@ export default function ConnectionsPage() {
       setDefaultLlmProvider(credentialsResult.value.defaultLlmProvider);
     } else {
       toast.error(
-        credentialsResult.reason instanceof Error
-          ? credentialsResult.reason.message
-          : "连接状态加载失败",
+        localizedConnectionError(credentialsResult.reason, locale, t("loadFailed")),
       );
     }
     setAiStatus(
       aiStatusResult.status === "fulfilled" ? aiStatusResult.value : null,
     );
     setLoading(false);
-  }, []);
+  }, [locale, t]);
 
   useEffect(() => {
     void load();
@@ -211,11 +212,11 @@ export default function ConnectionsPage() {
     const definition = PROVIDER_BY_ID.get(provider);
     const form = formFor(provider);
     if (!form.apiKey.trim()) {
-      toast.error("请填写 API Key");
+      toast.error(t("apiKeyRequired"));
       return;
     }
     if (definition?.kind === "model" && !form.model.trim()) {
-      toast.error("请填写模型名称");
+      toast.error(t("modelRequired"));
       return;
     }
     const value = Object.fromEntries(
@@ -235,15 +236,15 @@ export default function ConnectionsPage() {
         [provider]: createInitialForm(definition),
       }));
       setEditing(null);
-      toast.success(`${definition?.name ?? provider} 已加密保存`);
+      toast.success(t("savedToast", { provider: definition?.name ?? provider }));
       await load();
       if (provider === "aitoearn") {
-        toast.message("下一步授权发布账号", {
-          description: "API Key 保存后，还需要分别授权小红书和抖音账号。",
+        toast.message(t("authorizeNext"), {
+          description: t("authorizeNextHelp"),
         });
       }
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "保存失败");
+      toast.error(localizedConnectionError(cause, locale, t("saveFailed")));
     } finally {
       setBusyState(null);
     }
@@ -258,10 +259,10 @@ export default function ConnectionsPage() {
         }),
       );
       setEditing(null);
-      toast.success("凭证已删除");
+      toast.success(t("deletedToast"));
       await load();
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "删除失败");
+      toast.error(localizedConnectionError(cause, locale, t("deleteFailed")));
     } finally {
       setBusyState(null);
     }
@@ -278,9 +279,9 @@ export default function ConnectionsPage() {
         }),
       );
       setDefaultLlmProvider(data.defaultLlmProvider);
-      toast.success(`${LLM_PROVIDER_DEFINITIONS[provider].name} 已设为默认模型`);
+      toast.success(t("defaultToast", { provider: LLM_PROVIDER_DEFINITIONS[provider].name }));
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "设置失败");
+      toast.error(localizedConnectionError(cause, locale, t("defaultFailed")));
     } finally {
       setBusyState(null);
     }
@@ -296,10 +297,10 @@ export default function ConnectionsPage() {
           body: JSON.stringify({ provider }),
         }),
       );
-      toast.success("连接正常", { description: `模型：${data.model}` });
+      toast.success(t("testSuccess"), { description: t("testModel", { model: data.model }) });
       await load();
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "连接测试失败");
+      toast.error(localizedConnectionError(cause, locale, t("testFailed")));
     } finally {
       setBusyState(null);
     }
@@ -320,11 +321,11 @@ export default function ConnectionsPage() {
       );
       sessionStorage.setItem(`aitoearn-auth-${platform}`, data.sessionId);
       window.open(data.authorizationUrl, "_blank", "noopener,noreferrer");
-      toast.success("授权页已打开", {
-        description: "完成授权后回到这里检查账号状态。",
+      toast.success(t("authOpened"), {
+        description: t("authOpenedHelp"),
       });
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "无法开始授权");
+      toast.error(localizedConnectionError(cause, locale, t("authFailed")));
     } finally {
       setAuthBusy(null);
     }
@@ -341,16 +342,16 @@ export default function ConnectionsPage() {
       );
       setAccounts(data.accounts);
       if (data.accounts.length) {
-        toast.success(`已同步 ${data.accounts.length} 个账号`);
+        toast.success(t("accountsSynced", { count: data.accounts.length }));
       } else {
-        toast.message("暂未同步到发布账号");
+        toast.message(t("noAccountsSynced"));
       }
     } catch (cause) {
       setAccounts(null);
       setAccountsError(
-        cause instanceof Error ? cause.message : "账号同步失败",
+        localizedConnectionError(cause, locale, t("accountsFailed")),
       );
-      toast.error(cause instanceof Error ? cause.message : "账号同步失败");
+      toast.error(localizedConnectionError(cause, locale, t("accountsFailed")));
     } finally {
       setAuthBusy(null);
     }
@@ -358,13 +359,13 @@ export default function ConnectionsPage() {
 
   return (
     <AppShell
-      title="连接设置"
-      description="配置默认生成模型，以及数据、转写和发布服务。"
+      title={t("title")}
+      description={t("description")}
       actions={
         <Button asChild variant="outline" size="sm">
           <Link href="/settings/skills">
             <PuzzleIcon data-icon="inline-start" />
-            Skill 设置
+            {t("skillSettings")}
           </Link>
         </Button>
       }
@@ -372,16 +373,13 @@ export default function ConnectionsPage() {
       <div className="flex flex-col gap-8">
         <Alert>
           <ShieldCheckIcon aria-hidden="true" />
-          <AlertTitle>凭证使用 AES-256-GCM 加密存储</AlertTitle>
-          <AlertDescription>
-            浏览器、API 响应和应用日志不会返回 Key 原文。生产部署前必须单独配置
-            CREDENTIAL_ENCRYPTION_KEY。
-          </AlertDescription>
+          <AlertTitle>{t("encryptionTitle")}</AlertTitle>
+          <AlertDescription>{t("encryptionBody")}</AlertDescription>
         </Alert>
 
         <ProviderSection
-          title="模型配置"
-          description="ChatGPT、Grok 和 DeepSeek 共用统一生成接口；只有标记为“默认模型”的配置会用于新任务。"
+          title={t("modelsTitle")}
+          description={t("modelsDescription")}
         >
           {loading ? (
             <ProviderGridSkeleton count={3} />
@@ -420,8 +418,8 @@ export default function ConnectionsPage() {
         </ProviderSection>
 
         <ProviderSection
-          title="数据与发布连接"
-          description="这些凭证只服务于资料解析、语音转写和发布，不参与默认生成模型选择。"
+          title={t("integrationsTitle")}
+          description={t("integrationsDescription")}
         >
           {loading ? (
             <ProviderGridSkeleton count={4} />
@@ -468,17 +466,11 @@ export default function ConnectionsPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">小红书热点 Cookie</CardTitle>
-            <CardDescription>
-              只允许用于本地开发和用户本人可访问的来源。
-            </CardDescription>
+            <CardTitle className="text-base">{t("xhsCookieTitle")}</CardTitle>
+            <CardDescription>{t("xhsCookieDescription")}</CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground">
-              开发环境请在“热点研究 →
-              来源连接”里配置；生产环境必须迁移为用户级加密凭证，不能使用服务器本地
-              JSON。
-            </p>
+            <p className="text-sm text-muted-foreground">{t("xhsCookieBody")}</p>
           </CardContent>
         </Card>
       </div>
@@ -549,6 +541,7 @@ function PublishingConnectionPanel({
   onAuthorize: (platform: "xiaohongshu" | "douyin") => Promise<void>;
   onCheckAccounts: () => Promise<void>;
 }) {
+  const t = useTranslations("Connections");
   const connection = status?.connection;
   const notConfigured =
     connection === "not_configured" || (!loading && !summary?.configured);
@@ -558,10 +551,8 @@ function PublishingConnectionPanel({
       <CardHeader>
         <div className="flex items-start justify-between gap-4">
           <div>
-            <CardTitle className="text-base">发布账号授权（AiToEarn）</CardTitle>
-            <CardDescription className="mt-1.5">
-              先保存 AiToEarn API Key，再分别授权平台账号。每位用户只能看到自己的授权账号。
-            </CardDescription>
+            <CardTitle className="text-base">{t("publishAuthTitle")}</CardTitle>
+            <CardDescription className="mt-1.5">{t("publishAuthDescription")}</CardDescription>
           </div>
           <AiToEarnConnectionBadge connection={connection} />
         </div>
@@ -569,17 +560,13 @@ function PublishingConnectionPanel({
       <CardContent className="flex flex-col gap-4">
         {notConfigured ? (
           <Alert data-testid="aitoearn-not-configured">
-            <AlertTitle>连接未配置</AlertTitle>
-            <AlertDescription>
-              尚未保存 AiToEarn API Key。发布账号授权、素材直传与发布提交都需要先完成连接；系统不会用模拟数据代替。
-            </AlertDescription>
+            <AlertTitle>{t("publishNotConfiguredTitle")}</AlertTitle>
+            <AlertDescription>{t("publishNotConfiguredBody")}</AlertDescription>
           </Alert>
         ) : connection === "invalid" ? (
           <Alert variant="destructive" data-testid="aitoearn-invalid">
-            <AlertTitle>凭证已失效或被撤销</AlertTitle>
-            <AlertDescription>
-              请在上方 AiToEarn 卡片替换凭证后重试授权。
-            </AlertDescription>
+            <AlertTitle>{t("publishInvalidTitle")}</AlertTitle>
+            <AlertDescription>{t("publishInvalidBody")}</AlertDescription>
           </Alert>
         ) : null}
 
@@ -594,7 +581,7 @@ function PublishingConnectionPanel({
             ) : (
               <ExternalLinkIcon data-icon="inline-start" />
             )}
-            授权小红书
+            {t("authorizeXhs")}
           </Button>
           <Button
             variant="outline"
@@ -606,7 +593,7 @@ function PublishingConnectionPanel({
             ) : (
               <ExternalLinkIcon data-icon="inline-start" />
             )}
-            授权抖音
+            {t("authorizeDouyin")}
           </Button>
           <Button
             onClick={() => void onCheckAccounts()}
@@ -617,23 +604,23 @@ function PublishingConnectionPanel({
             ) : (
               <Link2Icon data-icon="inline-start" />
             )}
-            同步账号状态
+            {t("syncAccounts")}
           </Button>
         </div>
 
         <div data-testid="aitoearn-accounts">
-          <p className="text-sm font-medium">已授权账号</p>
+          <p className="text-sm font-medium">{t("authorizedAccounts")}</p>
           {accountsError ? (
             <p className="mt-2 text-sm text-destructive">{accountsError}</p>
           ) : accounts === null ? (
             <p className="mt-2 text-sm text-muted-foreground">
               {connection === "connected"
-                ? "点击“同步账号状态”查看当前授权的发布账号。"
-                : "完成连接后可在这里查看授权账号。"}
+                ? t("authorizedAccountsConnectedHelp")
+                : t("authorizedAccountsHelp")}
             </p>
           ) : accounts.length === 0 ? (
             <p className="mt-2 text-sm text-muted-foreground">
-              暂无授权账号，请先完成平台授权。
+              {t("authorizedAccountsEmpty")}
             </p>
           ) : (
             <ul className="mt-2 flex flex-col gap-2">
@@ -645,13 +632,13 @@ function PublishingConnectionPanel({
                   <span className="min-w-0 truncate">
                     {account.name}
                     <span className="ml-2 text-xs text-muted-foreground">
-                      {account.platform === "douyin" ? "抖音" : "小红书"}
+                      {account.platform === "douyin" ? t("douyin") : t("xiaohongshu")}
                     </span>
                   </span>
                   <Badge
                     variant={account.status === "active" ? "secondary" : "destructive"}
                   >
-                    {account.status === "active" ? "有效" : "已过期"}
+                    {account.status === "active" ? t("active") : t("expired")}
                   </Badge>
                 </li>
               ))}
@@ -661,7 +648,7 @@ function PublishingConnectionPanel({
 
         {status ? (
           <Alert>
-            <AlertTitle>平台发布规则（本地约束，实际以供应商为准）</AlertTitle>
+            <AlertTitle>{t("publishRulesTitle")}</AlertTitle>
             <AlertDescription>
               <ul className="mt-1 list-disc pl-4">
                 {status.metadata.platforms.map((rules) => (
@@ -683,23 +670,24 @@ function AiToEarnConnectionBadge({
 }: {
   connection?: AiToEarnStatus["connection"];
 }) {
+  const t = useTranslations("Connections");
   if (connection === "connected") {
     return (
       <Badge variant="secondary" data-testid="aitoearn-connection-badge">
-        已连接
+        {t("connected")}
       </Badge>
     );
   }
   if (connection === "invalid") {
     return (
       <Badge variant="destructive" data-testid="aitoearn-connection-badge">
-        凭证失效
+        {t("credentialInvalid")}
       </Badge>
     );
   }
   return (
     <Badge variant="outline" data-testid="aitoearn-connection-badge">
-      未配置
+      {t("notConfigured")}
     </Badge>
   );
 }
@@ -713,4 +701,9 @@ function createInitialForm(
     model: definition?.model ?? "",
     workspaceId: "",
   };
+}
+
+function localizedConnectionError(error: unknown, locale: string, fallback: string) {
+  if (locale === "zh-CN" && error instanceof Error) return error.message;
+  return fallback;
 }

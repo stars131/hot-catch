@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale, useTranslations } from "next-intl";
 import {
   ExternalLink as ExternalLinkIcon,
   KeyRound as KeyRoundIcon,
@@ -100,6 +101,8 @@ export function ProviderCredentialCard({
   onSetDefault,
   onTest,
 }: Props) {
+  const locale = useLocale();
+  const t = useTranslations("Connections");
   const configured = Boolean(summary?.configured);
   const busy = busyAction !== null;
   const showForm = !configured || editing;
@@ -122,13 +125,13 @@ export function ProviderCredentialCard({
                 ) : null}
               </CardTitle>
               <CardDescription className="mt-1.5 leading-5">
-                {definition.purpose}
+                {t(`providerPurposes.${definition.provider}`)}
               </CardDescription>
             </div>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-2">
             <ConnectionBadge summary={summary} />
-            {isDefault ? <Badge variant="secondary">默认模型</Badge> : null}
+            {isDefault ? <Badge variant="secondary">{t("defaultModel")}</Badge> : null}
           </div>
         </div>
       </CardHeader>
@@ -149,12 +152,12 @@ export function ProviderCredentialCard({
                 placeholder={definition.placeholder}
                 required
               />
-              <FieldDescription>密钥加密保存，保存后不会再次显示原文。</FieldDescription>
+              <FieldDescription>{t("keyStoredHelp")}</FieldDescription>
             </Field>
             {definition.baseUrl ? (
               <Field>
                 <FieldLabel htmlFor={`${definition.provider}-base-url`}>
-                  服务地址
+                  {t("baseUrl")}
                 </FieldLabel>
                 <Input
                   id={`${definition.provider}-base-url`}
@@ -168,7 +171,7 @@ export function ProviderCredentialCard({
             {definition.model ? (
               <Field>
                 <FieldLabel htmlFor={`${definition.provider}-model`}>
-                  模型名称
+                  {t("modelName")}
                 </FieldLabel>
                 <Input
                   id={`${definition.provider}-model`}
@@ -178,14 +181,14 @@ export function ProviderCredentialCard({
                   required
                 />
                 <FieldDescription>
-                  可改成账号当前有权限使用的模型 ID。
+                  {t("modelNameHelp")}
                 </FieldDescription>
               </Field>
             ) : null}
             {definition.workspaceId ? (
               <Field>
                 <FieldLabel htmlFor={`${definition.provider}-workspace-id`}>
-                  Workspace ID（可选）
+                  {t("workspaceOptional")}
                 </FieldLabel>
                 <Input
                   id={`${definition.provider}-workspace-id`}
@@ -198,20 +201,20 @@ export function ProviderCredentialCard({
         ) : (
           <div className="flex flex-col gap-3">
             <div className="rounded-lg border bg-muted/30 p-3">
-              <p className="text-xs text-muted-foreground">已保存凭证</p>
+              <p className="text-xs text-muted-foreground">{t("savedCredential")}</p>
               <p className="mt-1 font-mono text-sm">
                 {summary?.keyHint ?? "••••••••"}
               </p>
               {definition.model ? (
                 <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
                   <div>
-                    <dt className="text-muted-foreground">模型</dt>
+                    <dt className="text-muted-foreground">{t("model")}</dt>
                     <dd className="mt-0.5 truncate font-mono text-foreground">
                       {summary?.configuration?.model ?? definition.model}
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground">服务地址</dt>
+                    <dt className="text-muted-foreground">{t("baseUrl")}</dt>
                     <dd className="mt-0.5 truncate font-mono text-foreground">
                       {summary?.configuration?.baseUrl ?? definition.baseUrl}
                     </dd>
@@ -219,9 +222,9 @@ export function ProviderCredentialCard({
                 </dl>
               ) : null}
               <p className="mt-3 text-[11px] text-muted-foreground">
-                更新于 {formatDate(summary?.updatedAt)}
+                {t("updatedAt", { date: formatDate(summary?.updatedAt, locale) })}
                 {summary?.lastValidatedAt
-                  ? ` · 最近验证 ${formatDate(summary.lastValidatedAt)}`
+                  ? ` · ${t("lastValidated", { date: formatDate(summary.lastValidatedAt, locale) })}`
                   : ""}
               </p>
             </div>
@@ -235,13 +238,13 @@ export function ProviderCredentialCard({
             <Button asChild size="sm" variant="ghost">
               <a href={definition.docsUrl} target="_blank" rel="noreferrer">
                 <ExternalLinkIcon data-icon="inline-start" />
-                官方文档
+                {t("officialDocs")}
               </a>
             </Button>
           ) : null}
           {configured && !showForm ? (
             <Button size="sm" variant="outline" onClick={onEdit} disabled={busy}>
-              替换凭证
+              {t("replaceCredential")}
             </Button>
           ) : null}
           {configured && definition.kind === "model" && !showForm ? (
@@ -251,7 +254,7 @@ export function ProviderCredentialCard({
               ) : (
                 <PlugZapIcon data-icon="inline-start" />
               )}
-              测试连接
+              {t("testConnection")}
             </Button>
           ) : null}
         </div>
@@ -260,7 +263,7 @@ export function ProviderCredentialCard({
             <>
               {configured ? (
                 <Button size="sm" variant="ghost" onClick={onCancel} disabled={busy}>
-                  取消
+                  {t("cancel")}
                 </Button>
               ) : null}
               <Button size="sm" onClick={onSave} disabled={busy}>
@@ -269,7 +272,7 @@ export function ProviderCredentialCard({
                 ) : (
                   <SaveIcon data-icon="inline-start" />
                 )}
-                加密保存
+                {t("encryptedSave")}
               </Button>
             </>
           ) : (
@@ -281,7 +284,7 @@ export function ProviderCredentialCard({
                   ) : (
                     <StarIcon data-icon="inline-start" />
                   )}
-                  设为默认
+                  {t("setDefault")}
                 </Button>
               ) : null}
               <Button size="sm" variant="ghost" onClick={onRemove} disabled={busy}>
@@ -290,7 +293,7 @@ export function ProviderCredentialCard({
                 ) : (
                   <Trash2Icon data-icon="inline-start" />
                 )}
-                删除
+                {t("delete")}
               </Button>
             </>
           )}
@@ -301,15 +304,16 @@ export function ProviderCredentialCard({
 }
 
 function ConnectionBadge({ summary }: { summary?: CredentialSummaryView }) {
-  if (!summary?.configured) return <Badge variant="outline">未配置</Badge>;
-  if (summary.status === "active") return <Badge variant="secondary">已连接</Badge>;
+  const t = useTranslations("Connections");
+  if (!summary?.configured) return <Badge variant="outline">{t("notConfigured")}</Badge>;
+  if (summary.status === "active") return <Badge variant="secondary">{t("connected")}</Badge>;
   return (
     <Badge variant="destructive">
-      {summary.status === "invalid" ? "凭证失效" : "已撤销"}
+      {summary.status === "invalid" ? t("credentialInvalid") : t("revoked")}
     </Badge>
   );
 }
 
-function formatDate(value: string | null | undefined) {
-  return value ? new Date(value).toLocaleString("zh-CN") : "—";
+function formatDate(value: string | null | undefined, locale: string) {
+  return value ? new Date(value).toLocaleString(locale) : "—";
 }

@@ -5,6 +5,11 @@ import {
   type ChatCard,
   type ChatMessageMetadataV1,
 } from "@/lib/creator/chat-protocol";
+import {
+  CONTENT_KIND_IDS,
+  CONTENT_LOCALES,
+  PLATFORM_IDS,
+} from "@/lib/platforms/registry";
 
 /**
  * star-chat/v1 的运行时校验。
@@ -78,7 +83,7 @@ export const referenceCardSchema = z
     type: z.literal("reference"),
     state: z.enum(["importing", "ready", "needs_input", "failed"]),
     sourceUrl: httpUrlSchema,
-    platform: z.enum(["xiaohongshu", "douyin", "web"]).optional(),
+    platform: z.enum([...PLATFORM_IDS, "web"]).optional(),
     jobId: z.string().min(1).max(64).optional(),
     reference: entityRefSchema.optional(),
     author: z.string().max(120).optional(),
@@ -114,8 +119,9 @@ export const artifactCardSchema = z
     contentId: z.string().min(1).max(64),
     revisionId: z.string().min(1).max(64),
     revisionNumber: z.number().int().positive(),
-    platform: z.enum(["xiaohongshu", "douyin"]),
-    contentKind: z.enum(["xhs_graphic", "douyin_video_script"]),
+    platform: z.enum(PLATFORM_IDS),
+    contentKind: z.enum(CONTENT_KIND_IDS),
+    contentLocale: z.enum(CONTENT_LOCALES).optional(),
     title: z.string().min(1).max(200),
     preview: z.string().max(4000).optional(),
     score: z.number().min(0).max(100).optional(),
@@ -191,11 +197,11 @@ export const publishReadinessCardSchema = z
     contentId: z.string().min(1).max(64),
     revisionId: z.string().min(1).max(64),
     revisionNumber: z.number().int().positive(),
-    platform: z.enum(["xiaohongshu", "douyin"]),
-    contentKind: z.enum(["xhs_graphic", "douyin_video_script"]),
+    platform: z.enum(PLATFORM_IDS),
+    contentKind: z.enum(CONTENT_KIND_IDS),
     title: z.string().min(1).max(200),
     state: z.enum(["ready", "warnings", "blocked"]),
-    connection: z.enum(["connected", "missing", "invalid"]),
+    connection: z.enum(["connected", "missing", "invalid", "not_applicable"]),
     items: z
       .array(
         z
@@ -296,7 +302,9 @@ export const sendMessageRequestSchema = z
       .max(10),
     context: z
       .object({
-        platform: z.enum(["xiaohongshu", "douyin"]).optional(),
+        platform: z.enum(PLATFORM_IDS).optional(),
+        platforms: z.array(z.enum(PLATFORM_IDS)).min(1).max(5).optional(),
+        targetLocale: z.enum(CONTENT_LOCALES).optional(),
         contentId: z.string().min(1).max(64).optional(),
         personaId: z.string().min(1).max(64).optional(),
         styleProfileId: z.string().min(1).max(64).optional(),

@@ -3,37 +3,40 @@ import { Prisma, type RevisionSource } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/lib/errors";
 import type { z } from "zod";
-import type {
+import {
   createContentProjectSchema,
-  createRevisionSchema,
+  type createRevisionSchema,
 } from "@/lib/validators/content-project";
 
-type CreateContentProjectInput = z.infer<typeof createContentProjectSchema>;
+type CreateContentProjectInput = z.input<typeof createContentProjectSchema>;
+type NormalizedCreateContentProjectInput = z.output<typeof createContentProjectSchema>;
 type CreateRevisionInput = z.infer<typeof createRevisionSchema>;
 
 export async function createContentProject(
   userId: string,
   input: CreateContentProjectInput,
 ) {
-  await assertOwnedRelations(userId, input);
+  const normalized = createContentProjectSchema.parse(input);
+  await assertOwnedRelations(userId, normalized);
   return prisma.$transaction(async (tx) => {
     const content = await tx.generatedContent.create({
       data: {
         userId,
-        ideaId: input.ideaId,
-        personaId: input.personaId,
-        styleProfileId: input.styleProfileId,
-        platform: input.platform,
-        contentKind: input.contentKind,
-        outputType: input.contentKind,
-        title: input.title,
-        inputText: input.inputText,
-        inputType: input.ideaId ? "idea" : "draft",
+        ideaId: normalized.ideaId,
+        personaId: normalized.personaId,
+        styleProfileId: normalized.styleProfileId,
+        platform: normalized.platform,
+        contentKind: normalized.contentKind,
+        contentLocale: normalized.contentLocale,
+        outputType: normalized.contentKind,
+        title: normalized.title,
+        inputText: normalized.inputText,
+        inputType: normalized.ideaId ? "idea" : "draft",
       },
     });
-    if (input.ideaId) {
+    if (normalized.ideaId) {
       await tx.idea.update({
-        where: { id: input.ideaId },
+        where: { id: normalized.ideaId },
         data: { status: "creating" },
       });
     }
@@ -191,7 +194,7 @@ async function findRevisionByOriginJob(
 
 async function assertOwnedRelations(
   userId: string,
-  input: CreateContentProjectInput,
+  input: NormalizedCreateContentProjectInput,
 ) {
   const [idea, persona, styleProfile] = await Promise.all([
     input.ideaId
