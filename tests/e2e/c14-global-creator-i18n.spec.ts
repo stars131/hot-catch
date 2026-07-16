@@ -28,8 +28,9 @@ const contentKinds: Record<Platform, ContentKind> = {
 let userId = "";
 let conversationId = "";
 let runId = "";
-let redditJobId = "";
+let setupMessageId = "";
 const contentByPlatform = new Map<Platform, string>();
+const revisionByPlatform = new Map<Platform, string>();
 
 test.beforeAll(async () => {
   const user = await prisma.user.upsert({
@@ -81,7 +82,7 @@ test.beforeAll(async () => {
       },
     });
     contentByPlatform.set(platform, content.id);
-    await prisma.contentRevision.create({
+    const revision = await prisma.contentRevision.create({
       data: {
         userId,
         contentId: content.id,
@@ -94,140 +95,178 @@ test.beforeAll(async () => {
         checksum: `c14-e2e-${suffix}-${platform}`,
       },
     });
-    const failed = platform === "reddit";
-    const job = await prisma.processingJob.create({
+    revisionByPlatform.set(platform, revision.id);
+    await prisma.processingJob.create({
       data: {
         userId,
         type: "analysis",
         queueName: "analysis",
         action: "content.generate",
         agentRunId: runId,
-        status: failed ? "failed" : "succeeded",
-        progress: failed ? 50 : 100,
-        stage: failed ? "等待重试" : "完成",
-        errorCode: failed ? "CREDENTIAL_INVALID" : null,
-        errorMessage: failed ? "provider raw error must not be shown" : null,
+        status: "succeeded",
+        progress: 100,
+        stage: "完成",
         input: { contentId: content.id, uiLocale: "en-US" },
-        resultId: failed ? null : content.id,
+        resultId: content.id,
         completedAt: new Date(Date.now() + index),
         idempotencyKey: `c14-e2e-${suffix}-${platform}`,
       },
     });
-    if (platform === "reddit") redditJobId = job.id;
   }
+  const setupMessage = await prisma.message.create({
+    data: {
+      conversationId,
+      role: "assistant",
+      content: "请在卡片中选择五个平台、日语和本次使用的 Skill。",
+      metadata: {
+        protocol: "star-chat/v1",
+        cards: [
+          {
+            id: `card-c15-setup-${suffix}`,
+            version: 1,
+            type: "creation_setup",
+            brief: "五个平台的日语创作包",
+            uiLocale: "zh-CN",
+            maxPlatforms: 5,
+            platformOptions: platforms.map((platform) => ({
+              id: platform,
+              label: platform === "youtube" ? "YouTube" : platform === "tiktok" ? "TikTok" : platform === "instagram" ? "Instagram" : platform === "x" ? "X" : "Reddit",
+              description: "海外平台创作包",
+              group: "global",
+            })),
+            localeOptions: [
+              { id: "zh-CN", label: "简体中文" },
+              { id: "en-US", label: "英语" },
+              { id: "ja-JP", label: "日语" },
+            ],
+            skillOptions: [
+              { id: "builtin.expand-hook", label: "强化开头钩子" },
+              { id: "builtin.risk-check", label: "风险与合规检查" },
+            ],
+            defaultPlatformIds: ["youtube"],
+            defaultLocaleId: "zh-CN",
+            defaultSkillIds: [],
+            confirmAction: {
+              actionId: "creation.generate_bundle",
+              label: "确认并开始生成",
+              appearance: "primary",
+            },
+          },
+        ],
+      },
+    },
+  });
+  setupMessageId = setupMessage.id;
 });
 
 test.afterAll(async () => {
   await prisma.processingJob.deleteMany({ where: { agentRunId: runId } });
   await prisma.agentRun.deleteMany({ where: { id: runId, userId } });
+  await prisma.generatedContent.deleteMany({
+    where: { id: { in: [...contentByPlatform.values()] }, userId },
+  });
   await prisma.conversation.deleteMany({ where: { id: conversationId, userId } });
   await prisma.$disconnect();
 });
 
-test("five platforms, Japanese, multiple Skills, retry, edit and UTF-8 ZIP", async ({ page, request }) => {
+test("conversational five-platform setup preserves Japanese, Skills, editing and UTF-8 ZIP", async ({ page, request }) => {
   test.setTimeout(120_000);
 
-  await page.route("**/api/conversations", async (route) => {
-    if (route.request().method() !== "POST") return route.continue();
+  await request.post("/api/settings/locale", { data: { locale: "zh-CN" } });
+  await page.route(`**/api/conversations/${conversationId}/actions`, async (route) => {
+    const payload = route.request().postDataJSON();
+    expect(payload).toMatchObject({
+      sourceMessageId: setupMessageId,
+      actionId: "creation.generate_bundle",
+    });
+    expect(payload.values.optionIds).toEqual(
+      expect.arrayContaining([
+        ...platforms,
+        "ja-JP",
+        "builtin.expand-hook",
+        "builtin.risk-check",
+      ]),
+    );
+    await prisma.conversation.update({
+      where: { id: conversationId },
+      data: {
+        targetPlatforms: platforms,
+        targetLocale: "ja-JP",
+        activeSkillIds: ["builtin.expand-hook", "builtin.risk-check"],
+      },
+    });
+    const clientMessageId = `action:card-c15-setup-${suffix}:creation.generate_bundle`;
+    const resultMessage = await prisma.message.upsert({
+      where: {
+        conversationId_clientMessageId: { conversationId, clientMessageId },
+      },
+      update: {},
+      create: {
+        conversationId,
+        role: "assistant",
+        content: "五个平台的日语创作包已生成，可以逐项编辑与导出。",
+        clientMessageId,
+        metadata: {
+          protocol: "star-chat/v1",
+          runId,
+          cards: platforms.map((platform) => ({
+            id: `artifact-${platform}-${suffix}`,
+            version: 1,
+            type: "artifact",
+            contentId: contentByPlatform.get(platform),
+            revisionId: revisionByPlatform.get(platform),
+            revisionNumber: 1,
+            platform,
+            contentKind: contentKinds[platform],
+            contentLocale: "ja-JP",
+            title: `${platform} 日本語パッケージ`,
+            preview: `${platform} 向けの安全な本文です。`,
+            actions: [
+              { actionId: "artifact.open", label: "打开编辑", appearance: "primary" },
+            ],
+          })),
+        },
+      },
+    });
     await route.fulfill({
       status: 201,
       contentType: "application/json",
-      body: JSON.stringify({ conversation: { id: conversationId } }),
-    });
-  });
-  await page.route(`**/api/conversations/${conversationId}/generation-batches`, async (route) => {
-    const payload = route.request().postDataJSON();
-    expect(payload.targetPlatforms).toEqual(platforms);
-    expect(payload.targetLocale).toBe("ja-JP");
-    expect(payload.skillIds).toEqual(
-      expect.arrayContaining(["builtin.expand-hook", "builtin.risk-check"]),
-    );
-    await route.fulfill({
-      status: 202,
-      contentType: "application/json",
-      body: JSON.stringify({
-        runId,
-        items: platforms.map((platform) => ({
-          platform,
-          contentId: contentByPlatform.get(platform),
-          jobId: platform === "reddit" ? redditJobId : `seed-${platform}`,
-          status: platform === "reddit" ? "failed" : "succeeded",
-          progress: platform === "reddit" ? 50 : 100,
-          errorCode: platform === "reddit" ? "CREDENTIAL_INVALID" : null,
-          errorMessage: platform === "reddit" ? "provider raw error must not be shown" : null,
-          messageKey: platform === "reddit" ? "errors.credentialInvalid" : null,
-        })),
-      }),
-    });
-  });
-  await page.route(`**/api/agent-runs/${runId}/items/${contentByPlatform.get("reddit")}/retry`, async (route) => {
-    await prisma.processingJob.update({
-      where: { id: redditJobId },
-      data: { status: "succeeded", progress: 100, errorCode: null, errorMessage: null },
-    });
-    await route.fulfill({
-      status: 202,
-      contentType: "application/json",
-      body: JSON.stringify({ jobId: "reddit-retry", status: "queued" }),
-    });
-  });
-  await page.route(`**/api/agent-runs/${runId}`, async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        run: {
-          id: runId,
-          jobs: platforms.map((platform) => ({
-            id: platform === "reddit" ? "reddit-retry" : `seed-${platform}`,
-            status: "succeeded",
-            progress: 100,
-            stage: "complete",
-            errorCode: null,
-            errorMessage: null,
-            messageKey: null,
-            input: { contentId: contentByPlatform.get(platform) },
-          })),
-        },
-      }),
+      body: JSON.stringify({ resultMessage, replayed: false }),
     });
   });
 
-  await page.goto("/creator");
+  await page.goto(`/creator?conversationId=${conversationId}`);
+  const setupCard = page.locator('[data-testid^="card-creation-setup-"]');
+  await expect(setupCard).toBeVisible();
   for (const platform of ["TikTok", "Instagram", "X", "Reddit"]) {
-    await page.getByRole("checkbox", { name: platform, exact: true }).check();
+    await setupCard.getByRole("button", { name: new RegExp(platform) }).click();
   }
-  await page.getByRole("combobox", { name: "内容语言" }).click();
-  await page.getByRole("option", { name: "日语", exact: true }).click();
-  await page.getByRole("textbox", { name: "创作简报" }).fill("五个平台的日语创作包");
-  await expect(page.getByRole("checkbox", { name: "强化开头钩子" })).toBeVisible();
-  await page.getByRole("checkbox", { name: "强化开头钩子" }).check();
-  await page.getByRole("checkbox", { name: "风险与合规检查" }).check();
+  await setupCard.getByRole("button", { name: "日语", exact: true }).click();
+  await setupCard.getByRole("button", { name: /强化开头钩子/ }).click();
+  await setupCard.getByRole("button", { name: /风险与合规检查/ }).click();
 
   await page.getByRole("button", { name: "语言: English" }).click();
   await expect(page.locator("html")).toHaveAttribute("lang", "en-US");
-  await expect(page).toHaveURL(/\/creator$/);
-  await expect(page.getByRole("textbox", { name: "Creative brief" })).toHaveValue("五个平台的日语创作包");
-  await expect(page.getByRole("combobox", { name: "Content language" })).toContainText("Japanese");
+  await expect(page).toHaveURL(new RegExp(`/creator\\?conversationId=${conversationId}`));
   for (const platform of platforms) {
-    await expect(page.getByRole("checkbox", { name: platform === "youtube" ? "YouTube" : platform === "tiktok" ? "TikTok" : platform === "instagram" ? "Instagram" : platform === "x" ? "X" : "Reddit", exact: true })).toBeChecked();
+    const name = platform === "youtube" ? "YouTube" : platform === "tiktok" ? "TikTok" : platform === "instagram" ? "Instagram" : platform === "x" ? "X" : "Reddit";
+    await expect(setupCard.getByRole("button", { name: new RegExp(name) })).toHaveAttribute("aria-pressed", "true");
+  }
+  await expect(setupCard.getByRole("button", { name: "日语", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(setupCard.getByRole("button", { name: /强化开头钩子/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(setupCard.getByRole("button", { name: /风险与合规检查/ })).toHaveAttribute("aria-pressed", "true");
+
+  await setupCard.getByRole("button", { name: "确认并开始生成" }).click();
+  for (const platform of platforms) {
+    await expect(page.getByTestId(`card-artifact-artifact-${platform}-${suffix}`)).toBeVisible();
   }
 
-  await page.getByRole("button", { name: "Generate package" }).click();
-  for (const platform of platforms.slice(0, 4)) {
-    await expect(page.getByTestId(`batch-item-${platform}`).getByRole("button", { name: "Open editor" })).toBeVisible();
-  }
-  const redditCard = page.getByTestId("batch-item-reddit");
-  await expect(redditCard).toContainText("The credential is invalid or expired");
-  await expect(redditCard).not.toContainText("provider raw error");
-  await redditCard.getByRole("button", { name: "Retry this platform" }).click();
-  await expect(redditCard.getByRole("button", { name: "Open editor" })).toBeVisible({ timeout: 15_000 });
-
-  const youtubeCard = page.getByTestId("batch-item-youtube");
+  const youtubeCard = page.getByTestId(`card-artifact-artifact-youtube-${suffix}`);
   await youtubeCard.getByRole("button", { name: "Open editor" }).click();
-  await page.getByLabel("Content Markdown").fill("# YouTube\n\n編集済みの日本語本文");
-  await page.getByRole("button", { name: "Save new version" }).click();
-  await expect(page.getByText("New version saved")).toBeVisible();
+  await page.locator("#artifact-body").fill("編集済みの日本語本文");
+  await expect(page.getByTestId("artifact-save-state")).toContainText("已保存 v2", {
+    timeout: 15_000,
+  });
 
   const exported = await request.get(`/api/agent-runs/${runId}/export`);
   expect(exported.ok()).toBeTruthy();

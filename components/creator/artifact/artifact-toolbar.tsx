@@ -16,8 +16,7 @@ import type {
   ArtifactRevision,
 } from "@/hooks/creator/use-artifact";
 import { RevisionMenu } from "@/components/creator/artifact/revision-menu";
-
-const PLATFORM_LABEL = { xiaohongshu: "小红书图文", douyin: "抖音脚本" } as const;
+import { useTranslations } from "next-intl";
 
 /**
  * Artifact 固定顶栏:保存状态、版本、撤销/重做、评分、导出、准备发布、关闭。
@@ -41,8 +40,10 @@ export function ArtifactToolbar(props: {
   onExport: () => void;
   onShowScore: () => void;
   onPreparePublish: () => void;
+  canPreparePublish: boolean;
   onClose: () => void;
 }) {
+  const tp = useTranslations("Platforms");
   const saveLabel = props.dirty
     ? props.saveState === "saving"
       ? "保存中…"
@@ -67,7 +68,7 @@ export function ArtifactToolbar(props: {
           {props.title || "未命名内容"}
         </h2>
         <span className="shrink-0 rounded-lg border border-[#DDD7CE] bg-[#FAF9F6] px-1.5 py-0.5 text-[11px] text-[#746F67]">
-          {PLATFORM_LABEL[props.content.platform]}
+          {tp(props.content.platform)}
         </span>
         <Button
           size="icon"
@@ -165,7 +166,7 @@ export function ArtifactToolbar(props: {
           )}
           导出
         </Button>
-        <Button
+        {props.canPreparePublish ? <Button
           size="sm"
           variant="ghost"
           className="h-7 rounded-lg px-2 text-[11px] text-[#67625A]"
@@ -173,7 +174,7 @@ export function ArtifactToolbar(props: {
           data-testid="artifact-prepare-publish"
         >
           <Send className="h-3.5 w-3.5" /> 准备发布
-        </Button>
+        </Button> : null}
       </div>
     </div>
   );

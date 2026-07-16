@@ -6,6 +6,8 @@
  * 输入按 unknown 防御式读取:旧版本的 structuredContent 可能缺字段。
  */
 
+import type { ContentKindId } from "@/lib/platforms/registry";
+
 export type XhsMarkdownInput = {
   title: string;
   pages: Array<{ pageNumber: number; heading: string; body: string }>;
@@ -71,7 +73,7 @@ export type ManualRevisionPayload = {
  * - 没有结构化数据时退化为「标题 + 正文 + 标签」的简单 Markdown。
  */
 export function buildManualRevisionPayload(params: {
-  contentKind: "xhs_graphic" | "douyin_video_script";
+  contentKind: ContentKindId;
   baseStructuredContent: unknown;
   title: string;
   bodyText: string;
@@ -85,7 +87,8 @@ export function buildManualRevisionPayload(params: {
   if (hasStructure) {
     structuredContent = dropEmptyListEntries({ ...base, title: title || base.title });
     if (params.contentKind === "xhs_graphic") structuredContent.bodyText = body;
-    else structuredContent.caption = body;
+    else if (params.contentKind === "douyin_video_script") structuredContent.caption = body;
+    else structuredContent.bodyText = body;
   }
 
   return {
@@ -113,7 +116,7 @@ function dropEmptyListEntries(
 }
 
 function buildMarkdown(
-  contentKind: "xhs_graphic" | "douyin_video_script",
+  contentKind: ContentKindId,
   title: string,
   body: string,
   structured: Record<string, unknown> | undefined,
@@ -133,7 +136,7 @@ function buildMarkdown(
         tags,
       });
     }
-  } else {
+  } else if (contentKind === "douyin_video_script") {
     const shots = recordArray(structured?.shots);
     if (shots.length > 0) {
       return toDouyinMarkdown({

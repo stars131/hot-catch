@@ -101,6 +101,49 @@ describe("star-chat/v1 metadata schema", () => {
     };
     expect(chatCardSchema.safeParse(card).success).toBe(false);
   });
+
+  it("接受对话式创作设置卡与 AI 选题卡", () => {
+    const setup = {
+      id: "card-creation-setup-1",
+      version: 1,
+      type: "creation_setup",
+      brief: "把一场产品发布会做成多平台内容",
+      uiLocale: "zh-CN",
+      maxPlatforms: 5,
+      platformOptions: [
+        { id: "xiaohongshu", label: "小红书", description: "图文", group: "domestic" },
+        { id: "youtube", label: "YouTube", description: "视频内容包", group: "global" },
+      ],
+      localeOptions: [
+        { id: "zh-CN", label: "简体中文" },
+        { id: "en-US", label: "English" },
+      ],
+      skillOptions: [
+        { id: "builtin.reference-to-original", label: "参考转原创" },
+      ],
+      defaultPlatformIds: ["xiaohongshu"],
+      defaultLocaleId: "zh-CN",
+      defaultSkillIds: [],
+      confirmAction: { actionId: "creation.generate_bundle", label: "开始生成" },
+    };
+    const ideas = {
+      id: "card-ideas-1",
+      version: 1,
+      type: "idea_candidates",
+      brief: "AI 产品发布会",
+      direction: "经验复盘",
+      uiLocale: "zh-CN",
+      candidates: [
+        { id: "idea-1", title: "发布会复盘", angle: "从失误切入", audience: "产品团队", reason: "可执行" },
+        { id: "idea-2", title: "发布清单", angle: "从准备切入", audience: "创业者", reason: "高复用" },
+      ],
+      chooseAction: { actionId: "idea.choose", label: "选择" },
+      skipAction: { actionId: "idea.skip", label: "跳过" },
+    };
+
+    expect(chatCardSchema.safeParse(setup).success).toBe(true);
+    expect(chatCardSchema.safeParse(ideas).success).toBe(true);
+  });
 });
 
 describe("agent command 白名单", () => {

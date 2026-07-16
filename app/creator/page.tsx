@@ -1,6 +1,10 @@
-import { GlobalCreator } from "@/components/creator/global-creator";
-import { isForeignPlatformCreationEnabled } from "@/lib/env";
+import { Suspense } from "react";
+import { CreatorAgentWorkspace } from "@/components/creator/creator-agent-workspace";
 
 export default function CreatorPage() {
-  return <GlobalCreator foreignEnabled={isForeignPlatformCreationEnabled()} />;
+  return (
+    <Suspense fallback={null}>
+      <CreatorAgentWorkspace platform="xiaohongshu" global />
+    </Suspense>
+  );
 }

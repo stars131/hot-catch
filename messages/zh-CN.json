@@ -18,6 +18,7 @@
     "notConfigured": "未配置"
   },
   "Navigation": {
+    "skipToContent": "跳到主要内容",
     "creator": "多平台创作",
     "xiaohongshu": "小红书创作",
     "douyin": "抖音脚本",
@@ -242,8 +243,8 @@
     "title": "连接设置",
     "description": "配置默认生成模型，以及数据、转写和发布服务。",
     "skillSettings": "Skill 设置",
-    "encryptionTitle": "凭证使用 AES-256-GCM 加密存储",
-    "encryptionBody": "浏览器、API 响应和应用日志不会返回 Key 原文。生产部署前必须单独配置 CREDENTIAL_ENCRYPTION_KEY。",
+    "encryptionTitle": "凭证仅属于当前登录账号",
+    "encryptionBody": "每位用户的模型、数据和发布凭证分别使用 AES-256-GCM 加密保存。浏览器、API 响应和日志不会返回 Key 原文；系统不会把服务器模型密钥作为个人任务的隐式兜底。",
     "modelsTitle": "模型配置",
     "modelsDescription": "ChatGPT、Grok 和 DeepSeek 共用统一生成接口；只有标记为默认模型的配置会用于新任务。",
     "integrationsTitle": "数据与发布连接",
@@ -253,6 +254,7 @@
       "grok": "Grok 兼容内容生成",
       "deepseek": "DeepSeek 内容生成",
       "tikhub": "小红书与抖音公开或授权账号、作品和指标解析",
+      "youtube_data": "使用你自己的 YouTube Data API Key 同步历史视频公开指标",
       "qwen_asr": "抖音视频语音转写",
       "aitoearn": "平台授权、素材上传、发布与记录回收",
       "firecrawl": "可选：导入普通公开网页资料"

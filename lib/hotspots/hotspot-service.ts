@@ -1,5 +1,6 @@
 import { getStoredHotspotCookieConfig } from "@/lib/hotspots/cookie-store";
 import type { UserHotspotCookieStore } from "@/lib/hotspots/user-cookie-store";
+import { areSharedHotspotCredentialsAllowed } from "@/lib/env";
 
 export type HotspotPlatformCode =
   | "baidu"
@@ -705,8 +706,9 @@ async function fetchCookieBackendItems(
   }
 
   const stored = credentialStore?.[source.code] ?? getStoredHotspotCookieConfig(source.code);
-  const configuredUpstream = process.env[config.upstreamEnv] || stored?.upstream;
-  const cookie = process.env[config.cookieEnv] || stored?.cookie;
+  const allowShared = areSharedHotspotCredentialsAllowed();
+  const configuredUpstream = stored?.upstream || (allowShared ? process.env[config.upstreamEnv] : undefined);
+  const cookie = stored?.cookie || (allowShared ? process.env[config.cookieEnv] : undefined);
   if (!configuredUpstream && !cookie) {
     throw new Error(`${source.label} Cookie 聚合待配置：设置 ${config.cookieEnv} 或 ${config.upstreamEnv}`);
   }
@@ -1328,8 +1330,13 @@ function toSourceDefinition(
 ): HotspotSourceDefinition {
   const cookieBackend = getCookieBackend(source.code);
   const stored = credentialStore?.[source.code] ?? getStoredHotspotCookieConfig(source.code);
-  const environmentCookieConfigured = cookieBackend ? Boolean(process.env[cookieBackend.cookieEnv]) : false;
-  const environmentUpstreamConfigured = cookieBackend ? Boolean(process.env[cookieBackend.upstreamEnv]) : false;
+  const allowShared = areSharedHotspotCredentialsAllowed();
+  const environmentCookieConfigured = cookieBackend
+    ? allowShared && Boolean(process.env[cookieBackend.cookieEnv])
+    : false;
+  const environmentUpstreamConfigured = cookieBackend
+    ? allowShared && Boolean(process.env[cookieBackend.upstreamEnv])
+    : false;
   const localCookieConfigured = Boolean(stored?.cookie);
   const localUpstreamConfigured = Boolean(stored?.upstream);
   return {

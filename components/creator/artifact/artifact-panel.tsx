@@ -72,6 +72,11 @@ export function ArtifactPanel(props: {
   const appliedChecklistNonceRef = useRef(0);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const supportsPublishing = Boolean(
+    artifact.content &&
+      (artifact.content.platform === "xiaohongshu" || artifact.content.platform === "douyin") &&
+      isDomesticContentKind(artifact.content.contentKind),
+  );
 
   // 打开时移入焦点,关闭时还原;切换内容时重置清单状态
   useEffect(() => {
@@ -134,7 +139,7 @@ export function ArtifactPanel(props: {
   const locate = useCallback(
     (dimensionKey: string) => {
       const kind = artifact.content?.contentKind;
-      if (!kind) return;
+      if (!kind || !isDomesticContentKind(kind)) return;
       const target = scoreTargetOf(kind, dimensionKey);
       if (!target) return;
       jumpToAnchor(target.tab, artifactBlockAnchor(target.blockId));
@@ -145,7 +150,7 @@ export function ArtifactPanel(props: {
   const handleAskRefine = useCallback(
     (section: ArtifactSectionRef, options?: { detail?: string; excerpt?: string }) => {
       const kind = artifact.content?.contentKind;
-      if (!kind || !props.onAskRefine) return;
+      if (!kind || !isDomesticContentKind(kind) || !props.onAskRefine) return;
       const patchSection = patchSectionOf(section);
       const rawExcerpt = (options?.excerpt ?? "").trim();
       props.onAskRefine({
@@ -278,13 +283,14 @@ export function ArtifactPanel(props: {
             onExport={() => void handleExport()}
             onShowScore={() => setTab("score")}
             onPreparePublish={() => setChecklistOpen(true)}
+            canPreparePublish={supportsPublishing}
             onClose={props.onClose}
           />
 
-          {checklistOpen ? (
+          {checklistOpen && supportsPublishing ? (
             <PublishChecklist
-              contentKind={artifact.content.contentKind}
-              platform={artifact.content.platform}
+              contentKind={artifact.content.contentKind as "xhs_graphic" | "douyin_video_script"}
+              platform={artifact.content.platform as "xiaohongshu" | "douyin"}
               draft={artifact.draft}
               fallbackTags={artifact.content.tags}
               revisionNumber={artifact.viewRevision?.revisionNumber ?? null}
@@ -461,4 +467,10 @@ export function ArtifactPanel(props: {
       )}
     </div>
   );
+}
+
+function isDomesticContentKind(
+  value: string,
+): value is "xhs_graphic" | "douyin_video_script" {
+  return value === "xhs_graphic" || value === "douyin_video_script";
 }

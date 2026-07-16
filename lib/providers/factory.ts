@@ -2,8 +2,7 @@ import {
   CredentialProvider,
   LlmProviderName,
 } from "@prisma/client";
-import { env, isDeepSeekConfigured } from "@/lib/env";
-import { AppError, isAppError } from "@/lib/errors";
+import { AppError } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { DeepSeekProvider } from "@/lib/providers/deepseek/provider";
 import { LLM_PROVIDER_DEFINITIONS } from "@/lib/providers/llm-config";
@@ -18,18 +17,9 @@ export async function createLlmProvider(userId: string) {
   const preferred = user?.defaultLlmProvider;
   if (preferred) return createLlmProviderFor(userId, preferred);
 
-  try {
-    return await createLlmProviderFor(userId, LlmProviderName.deepseek);
-  } catch (error) {
-    if (
-      isAppError(error) &&
-      error.code === "CREDENTIAL_NOT_CONFIGURED" &&
-      isDeepSeekConfigured()
-    ) {
-      return new DeepSeekProvider(env.DEEPSEEK_API_KEY);
-    }
-    throw error;
-  }
+  // 用户发起的生成任务只能使用该用户保存的凭证。服务器环境变量中的
+  // DEEPSEEK_API_KEY 仅供明确的系统级任务使用，不能成为租户间共享兜底。
+  return createLlmProviderFor(userId, LlmProviderName.deepseek);
 }
 
 export async function createLlmProviderFor(

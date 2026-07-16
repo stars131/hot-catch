@@ -26,20 +26,20 @@ test.describe("C3 消息与卡片动作(桌面 1440×900)", () => {
     // 点击选项并提交
     await page.getByRole("radio", { name: /经验分享/ }).click();
     await page.getByRole("button", { name: "确认方向" }).click();
-    await expect(page.getByText(/方向定为「经验分享」/)).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(/方向已设为「经验分享」/)).toBeVisible({ timeout: 15000 });
     await expect(page.getByText("已选择")).toBeVisible();
 
     // 刷新:消息、结果与已处理状态全部从数据库恢复
     await page.reload();
     await expect(page.getByText("选择内容方向")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText(/方向定为「经验分享」/)).toBeVisible();
+    await expect(page.getByText(/方向已设为「经验分享」/)).toBeVisible();
     await expect(page.getByText("已选择")).toBeVisible();
     await expect(page.getByRole("button", { name: "确认方向" })).toHaveCount(0);
 
     // 再次发送:不再重复出示方向卡
     await input.fill("目标读者是刚开始运动的上班族");
     await input.press("Enter");
-    await expect(page.getByText(/已记录/)).toBeVisible({ timeout: 20000 });
+    await expect(page.getByText(/我已把这段补充作为新的创作要求/)).toBeVisible({ timeout: 20000 });
     await expect(page.getByText("选择内容方向")).toHaveCount(1);
   });
 

@@ -26,6 +26,10 @@ import {
   loadUserHotspotCookieStore,
   saveUserHotspotCookieConfig,
 } from "@/lib/hotspots/user-cookie-store";
+import {
+  listTrackedPublications,
+  saveManualMetrics,
+} from "@/lib/tracking/tracking-service";
 
 const runId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 let userAId = "";
@@ -46,6 +50,35 @@ afterAll(async () => {
 });
 
 describe("cross-user isolation", () => {
+  it("keeps historical tracking records and manual metrics private", async () => {
+    const publication = await prisma.trackedPublication.create({
+      data: {
+        userId: userAId,
+        sourceKind: "web_article",
+        status: "active",
+        publicUrl: `https://web.test/articles/${runId}`,
+        urlFingerprint: `tracking-${runId}`,
+        title: "A 的历史文章",
+      },
+    });
+
+    expect((await listTrackedPublications(userBId)).some((item) => item.id === publication.id)).toBe(false);
+    await expect(
+      saveManualMetrics(userBId, publication.id, { viewCount: 99 }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    const snapshot = await saveManualMetrics(userAId, publication.id, {
+      viewCount: 120,
+      likeCount: 8,
+    });
+    expect(snapshot).toMatchObject({
+      userId: userAId,
+      source: "manual",
+      viewCount: 120,
+      likeCount: 8,
+    });
+  });
+
   it("does not expose benchmark accounts owned by another user", async () => {
     const account = await prisma.benchmarkAccount.create({
       data: {

@@ -26,6 +26,8 @@ import {
 import { buildPublishReadinessReply } from "@/lib/creator/publish-handoff";
 import { assertUrlSafe } from "@/lib/security/url-guard";
 import { enqueueJob } from "@/lib/jobs/queues";
+import { buildCreationSetupCard } from "@/lib/creator/creation-setup";
+import type { UiLocale } from "@/lib/platforms/registry";
 
 /**
  * C3 Agent 服务:消息、卡片动作与 AgentRun 的唯一服务端入口。
@@ -48,6 +50,7 @@ export type ReplyBuilder = (input: {
   userId: string;
   conversationId: string;
   text: string;
+  uiLocale?: UiLocale;
 }) => Promise<AgentReply> | AgentReply;
 
 const DIRECTION_CARD_ID = "card-direction";
@@ -150,31 +153,46 @@ async function buildImportReply(params: {
 }
 
 /** C3/C4 默认回复:确定性中文文案;URL 消息在 handleUserMessage 中走导入分支。 */
-export const buildDefaultReply: ReplyBuilder = async ({ conversationId, text }) => {
+export const buildDefaultReply: ReplyBuilder = async ({ userId, conversationId, text, uiLocale = "zh-CN" }) => {
   if (!(await conversationHasDirectionCard(conversationId))) {
+    const zh = uiLocale === "zh-CN";
     return {
-      text: "收到。为了让后面的创作更聚焦,先确认一下这条内容的方向:",
+      text: zh
+        ? "收到。先确认这次内容采用什么表达方向，随后我会把平台、语言和 Skill 选择卡放在同一条对话里。"
+        : "Got it. Choose a direction first, then I’ll keep platform, language and Skill selection in this conversation.",
       cards: [
         {
           id: DIRECTION_CARD_ID,
           version: 1,
           type: "option",
-          title: "选择内容方向",
+          title: zh ? "选择内容方向" : "Choose a content direction",
           mode: "single",
           options: [
-            { id: "direction-experience", label: "经验分享", description: "以个人经历和感受带出方法", recommended: true },
-            { id: "direction-checklist", label: "步骤清单", description: "按步骤给出可执行做法" },
-            { id: "direction-contrarian", label: "反常识观点", description: "用一个出人意料的判断切入" },
+            { id: "direction-experience", label: zh ? "经验分享" : "Experience-led", description: zh ? "以个人经历和感受带出方法" : "Lead with lived experience and practical lessons", recommended: true },
+            { id: "direction-checklist", label: zh ? "步骤清单" : "Step-by-step", description: zh ? "按步骤给出可执行做法" : "Turn the idea into concrete actions" },
+            { id: "direction-contrarian", label: zh ? "反常识观点" : "Contrarian angle", description: zh ? "用一个出人意料的判断切入" : "Open with a surprising but defensible point" },
           ],
-          submitAction: { actionId: "direction.choose", label: "确认方向", appearance: "primary" },
+          submitAction: { actionId: "direction.choose", label: zh ? "确认方向" : "Confirm direction", appearance: "primary" },
+          uiLocale,
         },
       ],
     };
   }
 
   return {
-    text: `已记录:「${text.slice(0, 80)}${text.length > 80 ? "…" : ""}」。当前版本可以在对话里确定方向并持续保存会话;初稿生成、链接导入和评分会按计划逐步接入,到时会直接出现在这条消息流里。`,
-    cards: [],
+    text:
+      uiLocale === "zh-CN"
+        ? "我已把这段补充作为新的创作要求。请在卡片里确认本次平台、内容语言和 Skill。"
+        : "I’ve added this as a new creation requirement. Confirm the platforms, content language and Skills below.",
+    cards: [
+      await buildCreationSetupCard({
+        userId,
+        conversationId,
+        brief: text,
+        uiLocale,
+        nonce: `${Date.now()}:${text}`,
+      }),
+    ],
   };
 };
 
@@ -364,6 +382,7 @@ export async function handleUserMessage(params: {
   skillIds?: string[];
   patchTarget?: PatchTarget;
   publishTarget?: PublishTarget;
+  uiLocale?: UiLocale;
   replyBuilder?: ReplyBuilder;
 }) {
   const conversation = await requireConversation(params.userId, params.conversationId);
@@ -468,6 +487,7 @@ export async function handleUserMessage(params: {
             userId: params.userId,
             conversationId: params.conversationId,
             text: params.text,
+            uiLocale: params.uiLocale,
           });
     const metadata = buildMetadata(reply.cards, created.run.id);
     // 就绪检查等分支会声明真实命令(如 publish.prepare),落到 AgentRun 便于追溯
@@ -543,6 +563,9 @@ export async function listConversationMessages(params: {
 function findCardAction(card: ChatCard, actionId: string): CardAction | null {
   const candidates: CardAction[] = [];
   if (card.type === "option") candidates.push(card.submitAction);
+  if (card.type === "creation_setup") candidates.push(card.confirmAction);
+  if (card.type === "idea_candidates")
+    candidates.push(card.chooseAction, card.skipAction);
   if (card.type === "approval") candidates.push(card.confirmAction, card.cancelAction);
   if ("actions" in card && card.actions) candidates.push(...card.actions);
   return candidates.find((action) => action.actionId === actionId) ?? null;

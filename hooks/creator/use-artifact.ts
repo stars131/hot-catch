@@ -22,6 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readApiJson } from "@/lib/api-client";
 import { buildManualRevisionPayload } from "@/lib/content/markdown";
+import type { ContentKindId, PlatformId } from "@/lib/platforms/registry";
 
 export type ArtifactRevision = {
   id: string;
@@ -60,8 +61,8 @@ export type ArtifactScore = {
 
 export type ArtifactContentData = {
   id: string;
-  platform: "xiaohongshu" | "douyin";
-  contentKind: "xhs_graphic" | "douyin_video_script";
+  platform: PlatformId;
+  contentKind: ContentKindId;
   title: string | null;
   tags: string[];
   interactionEnding: string | null;
@@ -123,8 +124,8 @@ function parseScore(value: unknown): ArtifactScore | null {
 
 type RawContent = {
   id: string;
-  platform: "xiaohongshu" | "douyin";
-  contentKind: "xhs_graphic" | "douyin_video_script";
+  platform: PlatformId;
+  contentKind: ContentKindId;
   title: string | null;
   tags: string[];
   interactionEnding: string | null;

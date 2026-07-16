@@ -33,6 +33,7 @@ const envSchema = z.object({
   XHS_THIRD_PARTY_BASE_URL: z.string().optional().default(""),
   FOREIGN_PLATFORM_CREATION_ENABLED: z.enum(["0", "1"]).default("0"),
   UI_I18N_ENABLED: z.enum(["0", "1"]).default("1"),
+  ALLOW_SHARED_HOTSPOT_CREDENTIALS: z.enum(["0", "1"]).default("0"),
   MAX_INPUT_LENGTH: z.coerce.number().int().positive().default(12000),
   MAX_BENCHMARK_ACCOUNTS_PER_ANALYSIS: z.coerce.number().int().positive().default(5),
   XHS_FETCH_CACHE_HOURS: z.coerce.number().int().nonnegative().default(24),
@@ -56,6 +57,10 @@ export function isForeignPlatformCreationEnabled(): boolean {
 
 export function isUiI18nEnabled(): boolean {
   return env.UI_I18N_ENABLED === "1";
+}
+
+export function areSharedHotspotCredentialsAllowed(): boolean {
+  return env.NODE_ENV !== "production" && env.ALLOW_SHARED_HOTSPOT_CREDENTIALS === "1";
 }
 
 export type PublishProviderMode = "mock" | "real";

@@ -83,6 +83,14 @@ const MODEL_PROVIDERS: CredentialProviderCardDefinition[] = MODEL_PROVIDER_ORDER
 
 const INTEGRATION_PROVIDERS: CredentialProviderCardDefinition[] = [
   {
+    provider: "youtube_data",
+    name: "YouTube Data API",
+    purpose: "YouTube 历史视频公开指标同步",
+    placeholder: "AIza...",
+    docsUrl: "https://console.cloud.google.com/apis/library/youtube.googleapis.com",
+    kind: "integration",
+  },
+  {
     provider: "tikhub",
     name: "TikHub",
     purpose: "小红书与抖音公开或授权账号、作品和指标解析",

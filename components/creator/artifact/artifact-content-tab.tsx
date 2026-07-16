@@ -26,7 +26,10 @@ export function ArtifactContentTab(props: {
     options?: { detail?: string; excerpt?: string },
   ) => void;
 }) {
-  if (!props.draft.structured) {
+  if (
+    !props.draft.structured ||
+    !["xhs_graphic", "douyin_video_script"].includes(props.content.contentKind)
+  ) {
     return (
       <div className="space-y-4 px-3.5 py-4">
         <div data-artifact-block={artifactBlockAnchor("title")} className="rounded-xl">
@@ -44,7 +47,7 @@ export function ArtifactContentTab(props: {
         </div>
         <div data-artifact-block={artifactBlockAnchor("body")} className="rounded-xl">
           <label htmlFor="artifact-body" className="text-xs font-medium text-[#67625A]">
-            {props.content.contentKind === "xhs_graphic" ? "完整正文" : "发布文案"}
+            {props.content.contentKind === "xhs_graphic" ? "完整正文" : "内容正文"}
           </label>
           <Textarea
             id="artifact-body"
@@ -55,7 +58,9 @@ export function ArtifactContentTab(props: {
           />
         </div>
         <p className="text-xs leading-5 text-[#9C968C]">
-          该版本没有结构化数据,只能编辑标题与正文;在对话中让星迹重新生成可获得分页/分镜结构。
+          {props.content.contentKind === "xhs_graphic" || props.content.contentKind === "douyin_video_script"
+            ? "该版本没有结构化数据，只能编辑标题与正文；在对话中让星迹重新生成可获得分页/分镜结构。"
+            : "海外平台内容包使用通用正文编辑器；平台结构仍保存在版本数据中，导出包会继续包含 JSON。"}
         </p>
       </div>
     );

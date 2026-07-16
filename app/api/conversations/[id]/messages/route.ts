@@ -6,6 +6,7 @@ import {
   listConversationMessages,
 } from "@/lib/creator/agent-service";
 import { ok, fail } from "@/lib/http";
+import { isUiLocale } from "@/lib/platforms/registry";
 
 export const runtime = "nodejs";
 
@@ -36,6 +37,7 @@ export async function POST(
     const user = await requireUser();
     const { id } = await params;
     const input = sendMessageRequestSchema.parse(await req.json());
+    const cookieLocale = req.cookies.get("STARTRACE_UI_LOCALE")?.value;
     const text = input.parts
       .map((part) => {
         if (part.type === "text") return part.text;
@@ -55,6 +57,7 @@ export async function POST(
       skillIds: input.context?.skillIds,
       patchTarget: input.context?.patchTarget,
       publishTarget: input.context?.publishTarget,
+      uiLocale: isUiLocale(cookieLocale) ? cookieLocale : "zh-CN",
     });
     return ok(
       {

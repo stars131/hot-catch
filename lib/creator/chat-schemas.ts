@@ -74,6 +74,84 @@ export const optionCardSchema = z
       .min(1)
       .max(12),
     submitAction: cardActionSchema,
+    uiLocale: z.enum(["zh-CN", "en-US"]).optional(),
+  })
+  .strict();
+
+export const creationSetupCardSchema = z
+  .object({
+    ...cardBase,
+    type: z.literal("creation_setup"),
+    brief: z.string().trim().min(1).max(12000),
+    uiLocale: z.enum(["zh-CN", "en-US"]),
+    maxPlatforms: z.literal(5),
+    platformOptions: z
+      .array(
+        z
+          .object({
+            id: z.enum(PLATFORM_IDS),
+            label: z.string().min(1).max(80),
+            description: z.string().min(1).max(200),
+            group: z.enum(["domestic", "global"]),
+          })
+          .strict(),
+      )
+      .min(2)
+      .max(PLATFORM_IDS.length),
+    localeOptions: z
+      .array(
+        z
+          .object({
+            id: z.enum(CONTENT_LOCALES),
+            label: z.string().min(1).max(80),
+          })
+          .strict(),
+      )
+      .min(2)
+      .max(CONTENT_LOCALES.length),
+    skillOptions: z
+      .array(
+        z
+          .object({
+            id: z.string().regex(/^(?:builtin|custom)\.[a-z0-9._-]{2,80}$/),
+            label: z.string().min(1).max(120),
+            description: z.string().max(500).optional(),
+          })
+          .strict(),
+      )
+      .max(30),
+    defaultPlatformIds: z.array(z.enum(PLATFORM_IDS)).min(1).max(5),
+    defaultLocaleId: z.enum(CONTENT_LOCALES),
+    defaultSkillIds: z
+      .array(z.string().regex(/^(?:builtin|custom)\.[a-z0-9._-]{2,80}$/))
+      .max(8),
+    confirmAction: cardActionSchema,
+  })
+  .strict();
+
+export const ideaCandidatesCardSchema = z
+  .object({
+    ...cardBase,
+    type: z.literal("idea_candidates"),
+    brief: z.string().trim().min(1).max(12000),
+    direction: z.string().trim().min(1).max(200),
+    uiLocale: z.enum(["zh-CN", "en-US"]),
+    candidates: z
+      .array(
+        z
+          .object({
+            id: stableIdSchema,
+            title: z.string().trim().min(1).max(160),
+            angle: z.string().trim().min(1).max(800),
+            audience: z.string().trim().min(1).max(300),
+            reason: z.string().trim().min(1).max(500),
+          })
+          .strict(),
+      )
+      .min(2)
+      .max(6),
+    chooseAction: cardActionSchema,
+    skipAction: cardActionSchema,
   })
   .strict();
 
@@ -221,6 +299,8 @@ export const publishReadinessCardSchema = z
 
 export const chatCardSchema = z.discriminatedUnion("type", [
   optionCardSchema,
+  creationSetupCardSchema,
+  ideaCandidatesCardSchema,
   referenceCardSchema,
   progressCardSchema,
   artifactCardSchema,

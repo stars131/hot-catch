@@ -128,7 +128,7 @@ test.describe("C2 创作壳层(桌面 1440×900)", () => {
 test.describe("C2 创作壳层(手机 390×844)", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
-  test("单栏无横向溢出,Composer 不被遮挡,无底部全局导航", async ({ page }) => {
+  test("单栏无横向溢出,Composer 不被遮挡,持久底部导航可用", async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await page.goto(XHS);
     await expect(page.getByRole("heading", { level: 2, name: "今天想创作什么?" })).toBeVisible();
@@ -142,9 +142,11 @@ test.describe("C2 创作壳层(手机 390×844)", () => {
     const box = (await composer.boundingBox())!;
     expect(box.y + box.height).toBeLessThanOrEqual(844);
 
-    // 旧 AppShell 底部导航(热点研究/数据复盘图标条)不得出现
-    await expect(page.getByText("热点研究")).toHaveCount(0);
-    await expect(page.getByText("数据复盘")).toHaveCount(0);
+    // C15 起工作区移动端保留持久底部导航，切页时创作壳层不再重新挂载。
+    const mobileNav = page.getByRole("navigation", { name: "移动端主导航" });
+    await expect(mobileNav).toBeVisible();
+    await expect(mobileNav.getByText("热点")).toBeVisible();
+    await expect(mobileNav.getByText("复盘")).toBeVisible();
     // 桌面限定文案不得出现
     await expect(page.getByText(/右侧内容画布/)).toHaveCount(0);
     expect(errors).toEqual([]);

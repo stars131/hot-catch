@@ -11,6 +11,7 @@ import {
   Loader2,
   RefreshCw,
   Save,
+  Sparkles,
   SlidersHorizontal,
   Trash2,
   TrendingDown,
@@ -42,6 +43,23 @@ import type {
 type WindowValue = "1小时" | "24小时" | "7天";
 
 const WINDOWS: WindowValue[] = ["1小时", "24小时", "7天"];
+const TECH_SOURCE_CODES = new Set(["github", "hackernews", "juejin", "sspai", "v2ex", "hellogithub", "ithome", "36kr"]);
+
+type HotspotAiInsightView = {
+  id: string;
+  topicKey: string;
+  category: string;
+  lifecycle: "emerging" | "rising" | "peaking" | "declining";
+  audience: string | null;
+  summary: string;
+  recommendation: string;
+  riskLevel: "low" | "medium" | "high";
+  relevanceScore: number;
+  opportunityScore: number;
+  saturationScore: number;
+  suggestedAngles: string[];
+  evidence: string[];
+};
 
 export default function HotspotsPage() {
   const [payload, setPayload] = useState<HotspotPayload | null>(null);
@@ -57,6 +75,8 @@ export default function HotspotsPage() {
   const [upstream, setUpstream] = useState("");
   const [cookieSaving, setCookieSaving] = useState(false);
   const [collectingId, setCollectingId] = useState<string | null>(null);
+  const [insights, setInsights] = useState<HotspotAiInsightView[]>([]);
+  const [analyzing, setAnalyzing] = useState(false);
 
   const load = useCallback(async (refresh = false) => {
     setLoading(true);
@@ -85,17 +105,26 @@ export default function HotspotsPage() {
 
   const topics = useMemo(() => {
     const all = payload?.topics ?? [];
-    if (platform === "全平台") return all;
-    if (platform === "技术圈") {
-      const techCodes = new Set(["github", "hackernews", "juejin", "sspai", "v2ex", "hellogithub", "ithome", "36kr"]);
-      return all.filter((topic) => topic.sources.some((source) => techCodes.has(source.platformCode)));
-    }
-    return all.filter(
-      (topic) => topic.platform === platform || topic.platformShare.some((item) => item.label === platform),
+    const filtered = platform === "全平台"
+      ? all
+      : platform === "技术圈"
+        ? all.filter((topic) => topic.sources.some((source) => TECH_SOURCE_CODES.has(source.platformCode)))
+        : all.filter(
+            (topic) => topic.platform === platform || topic.platformShare.some((item) => item.label === platform),
+          );
+    const scoreByTopic = new Map(insights.map((item) => [item.topicKey, item.opportunityScore]));
+    if (!scoreByTopic.size) return filtered;
+    return [...filtered].sort(
+      (left, right) => (scoreByTopic.get(right.id) ?? -1) - (scoreByTopic.get(left.id) ?? -1),
     );
-  }, [payload?.topics, platform]);
+  }, [payload?.topics, platform, insights]);
 
   const selected = topics.find((topic) => topic.id === selectedId) ?? topics[0] ?? null;
+  const insightByTopic = useMemo(
+    () => new Map(insights.map((item) => [item.topicKey, item])),
+    [insights],
+  );
+  const selectedInsight = selected ? insightByTopic.get(selected.id) ?? null : null;
   const failures = payload?.sourceHealth.filter((source) => !source.ok) ?? [];
 
   async function collect(topic: HotspotTopic) {
@@ -130,6 +159,34 @@ export default function HotspotsPage() {
       toast.error(cause instanceof Error ? cause.message : "收藏失败");
     } finally {
       setCollectingId(null);
+    }
+  }
+
+  async function analyzeVisibleTopics() {
+    if (!topics.length) return;
+    setAnalyzing(true);
+    try {
+      const result = await readApiJson<{ insights: HotspotAiInsightView[]; analyzedCount: number }>(
+        await fetch("/api/hotspots/analyze", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ topicIds: topics.slice(0, 12).map((topic) => topic.id) }),
+        }),
+      );
+      setInsights((current) => {
+        const merged = new Map(current.map((item) => [item.topicKey, item]));
+        result.insights.forEach((item) => merged.set(item.topicKey, item));
+        return [...merged.values()];
+      });
+      toast.success(`AI 已分析 ${result.analyzedCount} 个热点`, {
+        description: "清单已按机会分排序，原始热度和来源证据保持不变。",
+      });
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "AI 热点分析失败", {
+        description: "请先在连接设置中配置你自己的模型凭证。",
+      });
+    } finally {
+      setAnalyzing(false);
     }
   }
 
@@ -171,6 +228,9 @@ export default function HotspotsPage() {
       description="汇总多源趋势、保留来源证据；这里不直接生成内容。"
       actions={
         <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => void analyzeVisibleTopics()} disabled={analyzing || !topics.length}>
+            {analyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} AI 筛选与建议
+          </Button>
           <Button variant="outline" size="sm" onClick={() => openCookie()}>
             <KeyRound className="h-4 w-4" /> 来源连接
           </Button>
@@ -236,12 +296,12 @@ export default function HotspotsPage() {
                       <tr><th className="px-4 py-3 font-medium">话题</th><th className="px-4 py-3 font-medium">平台</th><th className="px-4 py-3 font-medium">热度</th><th className="px-4 py-3 font-medium">变化</th><th className="px-4 py-3 font-medium">状态</th><th className="w-12" /></tr>
                     </thead>
                     <tbody className="divide-y">
-                      {topics.map((topic) => <TopicRow key={topic.id} topic={topic} active={selected?.id === topic.id} onSelect={() => setSelectedId(topic.id)} />)}
+                      {topics.map((topic) => <TopicRow key={topic.id} topic={topic} insight={insightByTopic.get(topic.id)} active={selected?.id === topic.id} onSelect={() => setSelectedId(topic.id)} />)}
                     </tbody>
                   </table>
                 </div>
                 <div className="space-y-3 md:hidden">
-                  {topics.map((topic) => <TopicCard key={topic.id} topic={topic} active={selected?.id === topic.id} onSelect={() => setSelectedId(topic.id)} onCollect={() => void collect(topic)} collecting={collectingId === topic.id} />)}
+                  {topics.map((topic) => <TopicCard key={topic.id} topic={topic} insight={insightByTopic.get(topic.id)} active={selected?.id === topic.id} onSelect={() => setSelectedId(topic.id)} onCollect={() => void collect(topic)} collecting={collectingId === topic.id} />)}
                 </div>
               </>
             )}
@@ -258,6 +318,7 @@ export default function HotspotsPage() {
             </CardHeader>
             <CardContent className="grid gap-6 lg:grid-cols-[1fr_340px]">
               <div>
+                {selectedInsight ? <AiInsightPanel insight={selectedInsight} /> : null}
                 <p className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">可切入角度</p>
                 <div className="space-y-3">{selected.angles.map((angle) => <div key={angle.title} className="rounded-lg border bg-muted/25 p-4"><div className="flex items-center justify-between gap-4"><p className="font-medium">{angle.title}</p><span className="font-mono text-sm text-brand">{angle.heat}</span></div><p className="mt-2 text-sm leading-6 text-muted-foreground">{angle.description}</p></div>)}</div>
               </div>
@@ -293,12 +354,22 @@ function PlatformFilters({ values, value, onChange }: { values: string[]; value:
   return <div className="scrollbar-none flex max-w-full gap-2 overflow-x-auto pb-1 whitespace-nowrap">{values.map((item) => <button key={item} type="button" onClick={() => onChange(item)} className={cn("shrink-0 rounded-lg border px-3 py-2 text-xs transition-colors", value === item ? "border-brand bg-brand text-white" : "bg-background text-muted-foreground hover:text-foreground")}>{item}</button>)}</div>;
 }
 
-function TopicRow({ topic, active, onSelect }: { topic: HotspotTopic; active: boolean; onSelect: () => void }) {
-  return <tr onClick={onSelect} className={cn("cursor-pointer transition-colors hover:bg-muted/40", active && "bg-brand/[0.04]")}><td className="px-4 py-3"><p className="font-medium text-foreground">{topic.title}</p><p className="mt-1 text-xs text-muted-foreground">{topic.category} · {topic.sources.length} 个来源</p></td><td className="px-4 py-3 text-muted-foreground">{topic.platform}</td><td className="px-4 py-3 font-mono font-medium">{topic.heat.toFixed(1)}</td><td className={cn("px-4 py-3 font-mono text-xs", topic.change >= 0 ? "text-emerald-700" : "text-red-700")}>{topic.change >= 0 ? "+" : ""}{topic.change}%</td><td className="px-4 py-3"><StatusBadge status={topic.status} /></td><td><ChevronRight className="h-4 w-4 text-muted-foreground" /></td></tr>;
+function TopicRow({ topic, insight, active, onSelect }: { topic: HotspotTopic; insight?: HotspotAiInsightView; active: boolean; onSelect: () => void }) {
+  return <tr onClick={onSelect} className={cn("cursor-pointer transition-colors hover:bg-muted/40", active && "bg-brand/[0.04]")}><td className="px-4 py-3"><p className="font-medium text-foreground">{topic.title}</p><p className="mt-1 text-xs text-muted-foreground">{topic.category} · {topic.sources.length} 个来源{insight ? ` · AI 机会 ${insight.opportunityScore}` : ""}</p></td><td className="px-4 py-3 text-muted-foreground">{topic.platform}</td><td className="px-4 py-3 font-mono font-medium">{topic.heat.toFixed(1)}</td><td className={cn("px-4 py-3 font-mono text-xs", topic.change >= 0 ? "text-emerald-700" : "text-red-700")}>{topic.change >= 0 ? "+" : ""}{topic.change}%</td><td className="px-4 py-3"><StatusBadge status={topic.status} /></td><td><ChevronRight className="h-4 w-4 text-muted-foreground" /></td></tr>;
 }
 
-function TopicCard({ topic, active, onSelect, onCollect, collecting }: { topic: HotspotTopic; active: boolean; onSelect: () => void; onCollect: () => void; collecting: boolean }) {
-  return <article className={cn("rounded-xl border bg-card p-4", active && "border-brand/50")}><button type="button" className="w-full text-left" onClick={onSelect}><div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="mb-2 flex items-center gap-2"><Badge variant="outline">{topic.platform}</Badge><StatusBadge status={topic.status} /></div><h3 className="font-semibold leading-6">{topic.title}</h3><p className="mt-1 text-xs text-muted-foreground">{topic.category} · {topic.sources.length} 个来源</p></div><div className="shrink-0 text-right"><p className="font-mono text-xl">{topic.heat.toFixed(1)}</p><p className={cn("mt-1 flex items-center justify-end gap-1 text-xs", topic.change >= 0 ? "text-emerald-700" : "text-red-700")}>{topic.change >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}{Math.abs(topic.change)}%</p></div></div></button>{active ? <div className="mt-4 border-t pt-4"><p className="text-sm font-medium">{topic.angles[0]?.title ?? "值得继续观察"}</p><p className="mt-1 line-clamp-3 text-xs leading-5 text-muted-foreground">{topic.angles[0]?.description ?? topic.keywords.join("、")}</p><Button className="mt-4 w-full" onClick={onCollect} disabled={collecting}>{collecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bookmark className="h-4 w-4" />}收藏到选题库</Button></div> : null}</article>;
+function TopicCard({ topic, insight, active, onSelect, onCollect, collecting }: { topic: HotspotTopic; insight?: HotspotAiInsightView; active: boolean; onSelect: () => void; onCollect: () => void; collecting: boolean }) {
+  return <article className={cn("rounded-xl border bg-card p-4", active && "border-brand/50")}><button type="button" className="w-full text-left" onClick={onSelect}><div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="mb-2 flex items-center gap-2"><Badge variant="outline">{topic.platform}</Badge><StatusBadge status={topic.status} /></div><h3 className="font-semibold leading-6">{topic.title}</h3><p className="mt-1 text-xs text-muted-foreground">{topic.category} · {topic.sources.length} 个来源{insight ? ` · AI 机会 ${insight.opportunityScore}` : ""}</p></div><div className="shrink-0 text-right"><p className="font-mono text-xl">{topic.heat.toFixed(1)}</p><p className={cn("mt-1 flex items-center justify-end gap-1 text-xs", topic.change >= 0 ? "text-emerald-700" : "text-red-700")}>{topic.change >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}{Math.abs(topic.change)}%</p></div></div></button>{active ? <div className="mt-4 border-t pt-4">{insight ? <p className="mb-2 rounded-md bg-violet-50 p-2 text-xs leading-5 text-violet-900">{insight.recommendation}</p> : null}<p className="text-sm font-medium">{topic.angles[0]?.title ?? "值得继续观察"}</p><p className="mt-1 line-clamp-3 text-xs leading-5 text-muted-foreground">{topic.angles[0]?.description ?? topic.keywords.join("、")}</p><Button className="mt-4 w-full" onClick={onCollect} disabled={collecting}>{collecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bookmark className="h-4 w-4" />}收藏到选题库</Button></div> : null}</article>;
+}
+
+function AiInsightPanel({ insight }: { insight: HotspotAiInsightView }) {
+  const lifecycle = { emerging: "萌芽", rising: "上升", peaking: "高峰", declining: "回落" }[insight.lifecycle];
+  const risk = { low: "低风险", medium: "中风险", high: "高风险" }[insight.riskLevel];
+  return <div className="mb-5 rounded-xl border border-violet-200 bg-violet-50/70 p-4"><div className="flex flex-wrap items-center gap-2"><Sparkles className="h-4 w-4 text-violet-700" /><p className="font-semibold text-violet-950">AI 研究建议</p><Badge variant="outline" className="border-violet-200 bg-white text-violet-800">{lifecycle}</Badge><Badge variant="outline" className="border-violet-200 bg-white text-violet-800">{risk}</Badge></div><div className="mt-3 grid grid-cols-3 gap-2"><AiScore label="相关" value={insight.relevanceScore} /><AiScore label="机会" value={insight.opportunityScore} /><AiScore label="饱和" value={insight.saturationScore} /></div><p className="mt-4 text-sm leading-6 text-violet-950">{insight.summary}</p><p className="mt-3 rounded-lg bg-white/80 p-3 text-sm leading-6 text-violet-950"><span className="font-medium">建议：</span>{insight.recommendation}</p><div className="mt-3 flex flex-wrap gap-2">{insight.suggestedAngles.map((angle) => <span key={angle} className="rounded-full border border-violet-200 bg-white px-3 py-1 text-xs text-violet-900">{angle}</span>)}</div><details className="mt-3 text-xs text-violet-900"><summary className="cursor-pointer font-medium">查看 AI 使用的证据</summary><ul className="mt-2 space-y-1">{insight.evidence.map((item) => <li key={item}>· {item}</li>)}</ul></details></div>;
+}
+
+function AiScore({ label, value }: { label: string; value: number }) {
+  return <div className="rounded-lg bg-white p-2 text-center"><p className="text-[11px] text-muted-foreground">{label}</p><p className="mt-1 font-mono text-lg font-semibold text-violet-800">{value}</p></div>;
 }
 
 function StatusBadge({ status }: { status: HotspotTopic["status"] }) {

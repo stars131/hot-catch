@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Textarea } from "@/components/ui/textarea";
 import { readApiJson } from "@/lib/api-client";
 import { DataSourceBadge } from "@/components/performance/metric-timeline";
+import { HistoricalTrackingPanel } from "@/components/tracking/historical-tracking-panel";
 
 type Snapshot = { id: string; window: "d1" | "d3" | "d7" | "manual"; observedAt: string; viewCount: number | null; likeCount: number | null; collectCount: number | null; commentCount: number | null; shareCount: number | null; followerDelta: number | null; dataSource: "mock-fixture" | "provider" };
 type Availability = { available: true } | { available: false; reason: string; message: string };
@@ -43,8 +44,10 @@ export default function RetrospectivesPage() {
   }
 
   return (
-    <AppShell title="数据复盘" description="对照发布前预测与 D+1 / D+3 / D+7 实际指标；规则变化必须回测并由人确认。" actions={<Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw className="h-4 w-4" />刷新</Button>}>
+    <AppShell title="数据复盘" description="统一查看系统发布与历史作品；真实指标和 AI 建议始终标明来源。" actions={<Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw className="h-4 w-4" />刷新</Button>}>
       <div className="space-y-5">
+        <HistoricalTrackingPanel />
+        <div className="pt-3"><p className="text-sm font-semibold">系统内发布复盘</p><p className="mt-1 text-xs text-muted-foreground">以下记录继续使用发布前预测与 D+1 / D+3 / D+7 指标流程。</p></div>
         <Card className="border-amber-200 bg-amber-50/50"><CardContent className="flex items-start gap-3 p-4"><CircleAlert className="mt-0.5 h-5 w-5 text-amber-700" /><div><p className="text-sm font-medium text-amber-950">规则不会自动进化</p><p className="mt-1 text-xs leading-5 text-amber-800">只有连续三次同方向误判才产生候选建议；新规则必须完成回测并由你明确确认后才能启用。</p></div></CardContent></Card>
         {loading ? <div className="space-y-4">{[0, 1].map((item) => <div key={item} className="h-96 animate-pulse rounded-xl bg-muted" />)}</div> : !items.length ? <Card><CardContent className="py-20 text-center"><BarChart3 className="mx-auto h-7 w-7 text-muted-foreground" /><p className="mt-4 font-medium">目前没有到期复盘</p><p className="mt-1 text-sm text-muted-foreground">作品发布后会自动安排 D+1、D+3、D+7 指标任务，D+7 到期后出现在这里。</p></CardContent></Card> : items.map((item) => <RetrospectiveCard key={item.id} item={item} value={conclusions[item.id] ?? ""} onChange={(value) => setConclusions((current) => ({ ...current, [item.id]: value }))} busy={busyId === item.id} onSave={() => void save(item, "drafted")} onAccept={() => void save(item, "accepted")} onDismiss={() => void save(item, "dismissed")} />)}
       </div>

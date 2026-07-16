@@ -1,4 +1,9 @@
-import type { ContentKindId, ContentLocale, PlatformId } from "@/lib/platforms/registry";
+import type {
+  ContentKindId,
+  ContentLocale,
+  PlatformId,
+  UiLocale,
+} from "@/lib/platforms/registry";
 
 /**
  * star-chat/v1 会话卡片协议的稳定类型定义。
@@ -42,6 +47,53 @@ export type OptionCard = {
     recommended?: boolean;
   }>;
   submitAction: CardAction;
+  uiLocale?: UiLocale;
+};
+
+export type CreationSetupCard = {
+  id: string;
+  version: 1;
+  type: "creation_setup";
+  brief: string;
+  uiLocale: UiLocale;
+  maxPlatforms: 5;
+  platformOptions: Array<{
+    id: PlatformId;
+    label: string;
+    description: string;
+    group: "domestic" | "global";
+  }>;
+  localeOptions: Array<{
+    id: ContentLocale;
+    label: string;
+  }>;
+  skillOptions: Array<{
+    id: string;
+    label: string;
+    description?: string;
+  }>;
+  defaultPlatformIds: PlatformId[];
+  defaultLocaleId: ContentLocale;
+  defaultSkillIds: string[];
+  confirmAction: CardAction;
+};
+
+export type IdeaCandidatesCard = {
+  id: string;
+  version: 1;
+  type: "idea_candidates";
+  brief: string;
+  direction: string;
+  uiLocale: UiLocale;
+  candidates: Array<{
+    id: string;
+    title: string;
+    angle: string;
+    audience: string;
+    reason: string;
+  }>;
+  chooseAction: CardAction;
+  skipAction: CardAction;
 };
 
 export type ReferenceCard = {
@@ -145,6 +197,8 @@ export type PatchCard = {
 
 export type ChatCard =
   | OptionCard
+  | CreationSetupCard
+  | IdeaCandidatesCard
   | ReferenceCard
   | ProgressCard
   | ArtifactCard

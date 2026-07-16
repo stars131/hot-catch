@@ -11,20 +11,29 @@ import {
 
 const runId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 let userId = "";
+let isolatedUserId = "";
 
 beforeAll(async () => {
-  const user = await prisma.user.create({
-    data: { email: `llm-settings-${runId}@example.com` },
-  });
+  const [user, isolatedUser] = await Promise.all([
+    prisma.user.create({ data: { email: `llm-settings-${runId}@example.com` } }),
+    prisma.user.create({ data: { email: `llm-isolated-${runId}@example.com` } }),
+  ]);
   userId = user.id;
+  isolatedUserId = isolatedUser.id;
 });
 
 afterAll(async () => {
-  await prisma.user.deleteMany({ where: { id: userId } });
+  await prisma.user.deleteMany({ where: { id: { in: [userId, isolatedUserId] } } });
   await prisma.$disconnect();
 });
 
 describe("LLM provider settings", () => {
+  it("never falls back to a server model key for a user without credentials", async () => {
+    await expect(createLlmProvider(isolatedUserId)).rejects.toMatchObject({
+      code: "CREDENTIAL_NOT_CONFIGURED",
+    });
+  });
+
   it("selects the first saved model and resolves its configured model", async () => {
     await saveCredential(userId, CredentialProvider.openai, {
       apiKey: `sk-${runId}`,

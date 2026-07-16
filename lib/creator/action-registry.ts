@@ -1,7 +1,7 @@
 import { JobType, Prisma } from "@prisma/client";
 import type { CardAction, ChatCard } from "@/lib/creator/chat-protocol";
 import { prisma } from "@/lib/prisma";
-import { AppError } from "@/lib/errors";
+import { AppError, isAppError } from "@/lib/errors";
 import { enqueueJob } from "@/lib/jobs/queues";
 import {
   buildBriefFromIdea,
@@ -31,6 +31,9 @@ import {
   type PlatformId,
 } from "@/lib/platforms/registry";
 import { isForeignPlatformCreationEnabled } from "@/lib/env";
+import { buildCreationSetupCard } from "@/lib/creator/creation-setup";
+import { createGenerationBatch } from "@/lib/services/generation-batch-service";
+import { generateIdeaCandidatesCard } from "@/lib/creator/idea-assistant";
 
 /**
  * C3 服务端动作注册表。
@@ -133,11 +136,230 @@ export const ACTION_REGISTRY: Record<string, ActionHandler> = {
   /** 选项卡:确认内容方向 */
   "direction.choose": {
     repeatable: false,
-    execute: (context) => {
+    execute: async (context) => {
       const labels = requireOptionLabels(context);
+      const sourceMessage = await prisma.message.findFirst({
+        where: {
+          id: context.sourceMessageId,
+          conversationId: context.conversationId,
+          conversation: { userId: context.userId },
+        },
+        select: { createdAt: true },
+      });
+      const latestBrief = await prisma.message.findFirst({
+        where: {
+          conversationId: context.conversationId,
+          role: "user",
+          ...(sourceMessage ? { createdAt: { lte: sourceMessage.createdAt } } : {}),
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        select: { id: true, content: true },
+      });
+      const uiLocale =
+        context.card.type === "option" && context.card.uiLocale === "en-US"
+          ? "en-US"
+          : "zh-CN";
+      const brief = [
+        latestBrief?.content || "请根据当前会话生成内容",
+        uiLocale === "zh-CN"
+          ? `表达方向：${labels.join("、")}`
+          : `Direction: ${labels.join(", ")}`,
+      ].join("\n");
+      try {
+        const ideaCard = await generateIdeaCandidatesCard({
+          userId: context.userId,
+          brief: latestBrief?.content || brief,
+          direction: labels.join(uiLocale === "zh-CN" ? "、" : ", "),
+          uiLocale,
+          nonce: `${context.sourceMessageId}:${latestBrief?.id ?? "brief"}`,
+        });
+        return {
+          text:
+            uiLocale === "zh-CN"
+              ? `方向已设为「${labels.join("、")}」。我根据这段需求整理了几个可继续推进的选题。`
+              : `Direction set to “${labels.join(", ")}”. I drafted several ideas from your brief.`,
+          cards: [ideaCard],
+          command: "idea.propose",
+        };
+      } catch (error) {
+        if (
+          !isAppError(error) ||
+          !["CREDENTIAL_NOT_CONFIGURED", "CREDENTIAL_INVALID", "AI_GENERATION_FAILED", "PROVIDER_ERROR"].includes(error.code)
+        ) {
+          throw error;
+        }
+      }
       return {
-        text: `好的,方向定为「${labels.join("、")}」。接下来请补充主题、目标读者和想传递的核心价值,我会按这个方向整理创作思路;链接导入与初稿生成会在后续版本接入创作流程。`,
+        text:
+          uiLocale === "zh-CN"
+            ? `方向已设为「${labels.join("、")}」。当前账号的模型暂时无法生成候选选题，我没有用模板伪造建议；你仍可直接选择目标平台、语言和 Skill。`
+            : `Direction set to “${labels.join(", ")}”. Your model could not produce idea candidates, so no placeholder suggestions were substituted. You can still configure the target platforms, language and Skills.`,
+        cards: [
+          {
+            id: `notice-idea-model-${context.sourceMessageId.slice(-10)}`,
+            version: 1,
+            type: "notice",
+            tone: "warning",
+            title: uiLocale === "zh-CN" ? "未生成 AI 候选选题" : "AI idea candidates unavailable",
+            body:
+              uiLocale === "zh-CN"
+                ? "请在连接设置中确认个人默认模型可用。当前创作可以继续，但不会展示虚构的 AI 建议。"
+                : "Check that your personal default model works in Connections. Creation can continue, but fabricated AI suggestions are never shown.",
+            actions: [
+              {
+                actionId: "connection.open",
+                label: uiLocale === "zh-CN" ? "打开连接设置" : "Open Connections",
+                appearance: "ghost",
+                repeatable: true,
+              },
+            ],
+          },
+          await buildCreationSetupCard({
+            userId: context.userId,
+            conversationId: context.conversationId,
+            brief,
+            uiLocale,
+            nonce: `${context.sourceMessageId}:${latestBrief?.id ?? "brief"}`,
+          }),
+        ],
         command: "content.create",
+      };
+    },
+  },
+
+  "idea.choose": {
+    repeatable: false,
+    execute: async (context) => {
+      if (context.card.type !== "idea_candidates") {
+        throw new AppError("VALIDATION_ERROR", "选题候选卡类型不匹配。", 400);
+      }
+      const selectedIds = context.values.optionIds ?? [];
+      if (selectedIds.length !== 1) {
+        throw new AppError("VALIDATION_ERROR", "请选择且只能选择一个候选选题。", 400);
+      }
+      const candidate = context.card.candidates.find((item) => item.id === selectedIds[0]);
+      if (!candidate) {
+        throw new AppError("VALIDATION_ERROR", "候选选题不存在或已失效。", 400);
+      }
+      const existing = await prisma.idea.findFirst({
+        where: {
+          userId: context.userId,
+          evidence: { path: ["sourceCardId"], equals: context.card.id },
+        },
+      });
+      const idea =
+        existing ??
+        (await prisma.idea.create({
+          data: {
+            userId: context.userId,
+            source: "manual",
+            title: candidate.title,
+            angle: candidate.angle,
+            audience: candidate.audience,
+            notes: candidate.reason,
+            evidence: {
+              source: "conversation_ai",
+              sourceCardId: context.card.id,
+              direction: context.card.direction,
+            },
+          },
+        }));
+      const brief = [
+        candidate.title,
+        candidate.angle,
+        context.card.uiLocale === "zh-CN"
+          ? `目标受众：${candidate.audience}`
+          : `Audience: ${candidate.audience}`,
+        context.card.uiLocale === "zh-CN"
+          ? `创作理由：${candidate.reason}`
+          : `Why this idea: ${candidate.reason}`,
+      ].join("\n");
+      return {
+        text:
+          context.card.uiLocale === "zh-CN"
+            ? `已把「${candidate.title}」保存到你的选题库。接下来确认创作平台、内容语言和 Skill。`
+            : `“${candidate.title}” is saved to your private idea library. Now confirm platforms, content language and Skills.`,
+        cards: [
+          await buildCreationSetupCard({
+            userId: context.userId,
+            conversationId: context.conversationId,
+            brief,
+            uiLocale: context.card.uiLocale,
+            nonce: `${context.card.id}:${idea.id}`,
+          }),
+        ],
+        command: "idea.save",
+      };
+    },
+  },
+
+  "idea.skip": {
+    repeatable: false,
+    execute: async (context) => {
+      if (context.card.type !== "idea_candidates") {
+        throw new AppError("VALIDATION_ERROR", "选题候选卡类型不匹配。", 400);
+      }
+      return {
+        text:
+          context.card.uiLocale === "zh-CN"
+            ? "已跳过候选选题。直接确认这次创作的平台、内容语言和 Skill。"
+            : "Idea selection skipped. Configure platforms, content language and Skills directly.",
+        cards: [
+          await buildCreationSetupCard({
+            userId: context.userId,
+            conversationId: context.conversationId,
+            brief: [context.card.brief, context.card.direction].join("\n"),
+            uiLocale: context.card.uiLocale,
+            nonce: `${context.card.id}:skip`,
+          }),
+        ],
+        command: "idea.skip",
+      };
+    },
+  },
+
+  /** 对话式创作确认卡：重新校验卡内白名单与当前用户 Skill 后创建真实批量任务。 */
+  "creation.generate_bundle": {
+    repeatable: false,
+    execute: async (context) => {
+      if (context.card.type !== "creation_setup") {
+        throw new AppError("VALIDATION_ERROR", "创作设置卡类型不匹配。", 400);
+      }
+      const selected = new Set(context.values.optionIds ?? []);
+      const targetPlatforms = context.card.platformOptions
+        .map((option) => option.id)
+        .filter((id) => selected.has(id));
+      const targetLocales = context.card.localeOptions
+        .map((option) => option.id)
+        .filter((id) => selected.has(id));
+      const skillIds = context.card.skillOptions
+        .map((option) => option.id)
+        .filter((id) => selected.has(id));
+      if (!targetPlatforms.length || targetPlatforms.length > context.card.maxPlatforms) {
+        throw new AppError("VALIDATION_ERROR", "请选择 1–5 个目标平台。", 400);
+      }
+      if (targetLocales.length !== 1) {
+        throw new AppError("VALIDATION_ERROR", "请选择且只能选择一种内容语言。", 400);
+      }
+      const result = await createGenerationBatch({
+        userId: context.userId,
+        conversationId: context.conversationId,
+        input: {
+          brief: context.card.brief,
+          targetPlatforms,
+          targetLocale: targetLocales[0],
+          skillIds,
+        },
+        idempotencyKey: `chat:${context.card.id}`,
+        uiLocale: context.card.uiLocale,
+      });
+      const createdCount = result.items.filter((item) => item.jobId).length;
+      return {
+        text:
+          context.card.uiLocale === "zh-CN"
+            ? `已创建 ${createdCount} 个独立创作任务。每个平台可以分别查看、重试和编辑。`
+            : `Created ${createdCount} independent tasks. Each platform can be viewed, retried and edited separately.`,
+        command: "content.generate_bundle",
       };
     },
   },

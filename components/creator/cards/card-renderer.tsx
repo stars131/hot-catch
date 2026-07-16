@@ -17,6 +17,8 @@ import { ReferenceCardView } from "@/components/creator/cards/reference-card";
 import { ArtifactCardView } from "@/components/creator/cards/artifact-card";
 import { PatchCardView } from "@/components/creator/cards/patch-card";
 import { PublishReadinessCardView } from "@/components/creator/cards/publish-readiness-card";
+import { CreationSetupCardView } from "@/components/creator/cards/creation-setup-card";
+import { IdeaCandidatesCardView } from "@/components/creator/cards/idea-candidates-card";
 
 export type CardInvokeState = {
   phase: "idle" | "loading" | "success" | "failed";
@@ -34,6 +36,9 @@ export type InvokeCardAction = (params: {
 function processedActionIds(card: ChatCard, processedKeys: string[]): string[] {
   const candidates: string[] = [];
   if (card.type === "option") candidates.push(card.submitAction.actionId);
+  if (card.type === "creation_setup") candidates.push(card.confirmAction.actionId);
+  if (card.type === "idea_candidates")
+    candidates.push(card.chooseAction.actionId, card.skipAction.actionId);
   if (card.type === "approval")
     candidates.push(card.confirmAction.actionId, card.cancelAction.actionId);
   if ("actions" in card && card.actions)
@@ -89,6 +94,36 @@ export function CardRenderer(props: {
   }
 
   switch (props.card.type) {
+    case "idea_candidates":
+      return (
+        <IdeaCandidatesCardView
+          card={props.card}
+          state={state}
+          processedActionIds={processed}
+          onChoose={(candidateId) =>
+            void invoke(props.card.type === "idea_candidates" ? props.card.chooseAction.actionId : "", {
+              optionIds: [candidateId],
+            })
+          }
+          onSkip={() =>
+            void invoke(props.card.type === "idea_candidates" ? props.card.skipAction.actionId : "")
+          }
+        />
+      );
+    case "creation_setup":
+      return (
+        <CreationSetupCardView
+          card={props.card}
+          state={state}
+          processed={processed.length > 0}
+          onSubmit={(optionIds) =>
+            void invoke(
+              props.card.type === "creation_setup" ? props.card.confirmAction.actionId : "",
+              { optionIds },
+            )
+          }
+        />
+      );
     case "option":
       return (
         <OptionCardView

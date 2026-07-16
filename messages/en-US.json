@@ -18,6 +18,7 @@
     "notConfigured": "Not configured"
   },
   "Navigation": {
+    "skipToContent": "Skip to main content",
     "creator": "Multi-platform creator",
     "xiaohongshu": "Xiaohongshu creator",
     "douyin": "Douyin script",
@@ -242,8 +243,8 @@
     "title": "Connections",
     "description": "Configure the default generation model plus data, transcription and publishing services.",
     "skillSettings": "Skill settings",
-    "encryptionTitle": "Credentials are stored with AES-256-GCM encryption",
-    "encryptionBody": "The browser, API responses and application logs never return the original key. CREDENTIAL_ENCRYPTION_KEY must be configured separately before production deployment.",
+    "encryptionTitle": "Connections belong only to the signed-in account",
+    "encryptionBody": "Each user's model, data and publishing credentials are stored separately with AES-256-GCM encryption. The browser, API responses and logs never return the original key, and server model keys are never used as an implicit fallback for personal tasks.",
     "modelsTitle": "Model configuration",
     "modelsDescription": "ChatGPT, Grok and DeepSeek use one generation interface. Only the provider marked as default is used for new tasks.",
     "integrationsTitle": "Data and publishing connections",
@@ -253,6 +254,7 @@
       "grok": "Grok-compatible content generation",
       "deepseek": "DeepSeek content generation",
       "tikhub": "Public or authorized Xiaohongshu and Douyin account, post and metric parsing",
+      "youtube_data": "Sync public metrics for historical videos with your own YouTube Data API key",
       "qwen_asr": "Douyin video speech transcription",
       "aitoearn": "Account authorization, asset upload, publishing and record retrieval",
       "firecrawl": "Optional import for ordinary public web pages"

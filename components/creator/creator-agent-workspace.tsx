@@ -92,12 +92,19 @@ function quickEntriesFor(platform: Platform): QuickEntry[] {
   }) as QuickEntry[];
 }
 
-export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
+export function CreatorAgentWorkspace({
+  platform,
+  global = false,
+}: {
+  platform: Platform;
+  global?: boolean;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const conversationId = searchParams.get("conversationId");
   const contentId = searchParams.get("contentId");
+  const prefill = searchParams.get("prefill");
 
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [listLoading, setListLoading] = useState(true);
@@ -154,6 +161,11 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
         toast.error(error instanceof Error ? error.message : "Skill 列表加载失败"),
       );
   }, []);
+
+  useEffect(() => {
+    if (!prefill || conversationId) return;
+    setComposerValue((current) => current || prefill.slice(0, 12000));
+  }, [conversationId, prefill]);
 
   const reloadMessages = useCallback(
     async (id: string) => {
@@ -262,9 +274,10 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
       if (params.conversationId) query.set("conversationId", params.conversationId);
       if (params.contentId) query.set("contentId", params.contentId);
       const suffix = query.toString();
-      router.push(`/creator/${nextPlatform}${suffix ? `?${suffix}` : ""}`);
+      const base = global ? "/creator" : `/creator/${nextPlatform}`;
+      router.push(`${base}${suffix ? `?${suffix}` : ""}`);
     },
-    [router],
+    [global, router],
   );
 
   const submitText = useCallback(
@@ -377,6 +390,7 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
       if (clientKey) next.add(clientKey);
       return [...next];
     });
+    await reloadMessages(conversationId);
   };
 
   function handleRetry(message: ThreadMessage) {
@@ -553,10 +567,12 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
       <h1 className="truncate text-sm font-semibold tracking-tight">
         {threadState === "ready" && conversationTitle
           ? conversationTitle
-          : `${PLATFORM_LABEL[platform]}创作`}
+          : global
+            ? "多平台创作"
+            : `${PLATFORM_LABEL[platform]}创作`}
       </h1>
       <span className="shrink-0 rounded-lg border border-[#DDD7CE] bg-[#FFFDF9] px-1.5 py-0.5 text-[11px] text-[#746F67]">
-        {PLATFORM_LABEL[platform]}
+        {global ? "对话工作台" : PLATFORM_LABEL[platform]}
       </span>
       {busy ? (
         <span className="shrink-0 text-[11px] text-[#C83B32]">生成中</span>
@@ -620,6 +636,7 @@ export function CreatorAgentWorkspace({ platform }: { platform: Platform }) {
             }
           }}
           onSwitchPlatform={(next) => navigate(next, { conversationId, contentId })}
+          showPlatformSwitcher={!global}
         />
       }
       sidebarCollapsed={sidebarCollapsed}

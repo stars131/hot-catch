@@ -36,6 +36,7 @@ export function CreatorComposer(props: {
   onSend: () => void;
   onRemoveChip: (id: string) => void;
   onSwitchPlatform: (platform: "xiaohongshu" | "douyin") => void;
+  showPlatformSwitcher?: boolean;
   /** 从技能菜单选择内置 Skill(star-skill/v1 manifest 驱动) */
   onPickSkill?: (skill: SkillCatalogItem) => void;
   onToggleSkill: (skillId: string) => void;
@@ -169,7 +170,7 @@ export function CreatorComposer(props: {
 
         <div className="absolute inset-x-2 bottom-2 flex items-center gap-1">
           {/* + 菜单:技能来自内置 Skill Registry;未实现能力明确标注,不假装成功 */}
-          <div className="relative">
+          {props.showPlatformSwitcher !== false ? <div className="relative">
             <Button
               ref={plusButtonRef}
               type="button"
@@ -301,7 +302,7 @@ export function CreatorComposer(props: {
                 ) : null}
               </div>
             ) : null}
-          </div>
+          </div> : null}
 
           {/* 平台切换:上下文状态,不是两套布局 */}
           <div className="relative">

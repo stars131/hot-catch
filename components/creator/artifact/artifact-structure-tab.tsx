@@ -2,6 +2,7 @@
 
 import { artifactBlockAnchor, artifactItemAnchor } from "@/lib/creator/artifact-locator";
 import { formatSeconds, validateStoryboard } from "@/lib/content/storyboard";
+import type { ContentKindId } from "@/lib/platforms/registry";
 
 /**
  * 「结构」标签:当前版本的只读大纲。
@@ -9,7 +10,7 @@ import { formatSeconds, validateStoryboard } from "@/lib/content/storyboard";
  * 点击条目跳到「内容」标签中对应的编辑块;逐字段编辑都在「内容」标签完成。
  */
 export function ArtifactStructureTab(props: {
-  contentKind: "xhs_graphic" | "douyin_video_script";
+  contentKind: ContentKindId;
   structuredContent: unknown;
   onJumpTo: (anchor: string) => void;
 }) {
@@ -29,8 +30,12 @@ export function ArtifactStructureTab(props: {
     >
       {props.contentKind === "xhs_graphic" ? (
         <XhsOutline structured={structured} onJumpTo={props.onJumpTo} />
-      ) : (
+      ) : props.contentKind === "douyin_video_script" ? (
         <DouyinOutline structured={structured} onJumpTo={props.onJumpTo} />
+      ) : (
+        <div className="rounded-lg border border-[#DDD7CE] bg-[#FAF9F6] p-3 text-sm leading-6 text-[#67625A]">
+          海外平台的结构化字段会保留在 JSON 导出中；正文修改请在“内容”标签完成。
+        </div>
       )}
       <p className="text-xs leading-5 text-[#9C968C]">
         点击条目可跳到「内容」标签中的对应位置直接编辑。

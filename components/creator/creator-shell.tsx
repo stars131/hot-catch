@@ -5,6 +5,7 @@ import { Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import { LanguageSwitcher } from "@/components/language-switcher";
 
 /**
  * 创作专用壳层:左侧可折叠会话栏 + 居中消息主区 + 底部 Composer + 可选 Artifact 面板。
@@ -73,11 +74,12 @@ export function CreatorShell(props: {
           </Button>
 
           <div className="min-w-0 flex-1">{props.topbar}</div>
+          <LanguageSwitcher />
         </header>
 
         <main className="min-h-0 flex-1 overflow-y-auto">{props.children}</main>
 
-        <div className="shrink-0 border-t border-[#DDD7CE] bg-[#F4F1EA] px-3 pb-[max(env(safe-area-inset-bottom),12px)] pt-3">
+        <div className="shrink-0 border-t border-[#DDD7CE] bg-[#F4F1EA] px-3 pb-[max(calc(env(safe-area-inset-bottom)+64px),76px)] pt-3 lg:pb-[max(env(safe-area-inset-bottom),12px)]">
           {props.composer}
         </div>
       </div>
