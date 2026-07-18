@@ -2,6 +2,7 @@
   "name": "xhs-benchmark-copilot",
   "version": "0.1.0",
   "private": true,
+  "license": "AGPL-3.0-only",
   "description": "Xiaohongshu benchmark content copilot MVP",
   "scripts": {
     "dev": "next dev",
