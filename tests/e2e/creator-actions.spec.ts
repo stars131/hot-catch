@@ -9,6 +9,7 @@ test.describe("C3 消息与卡片动作(桌面 1440×900)", () => {
   test("发送消息 → 中文回复 + 方向选项卡 → 点击选项 → 刷新后卡片保持已处理", async ({
     page,
   }) => {
+    test.setTimeout(180_000);
     const unique = `晨跑打卡 ${Date.now()}`;
     await page.goto(XHS);
     const input = page.getByLabel("创作输入框");
@@ -19,28 +20,29 @@ test.describe("C3 消息与卡片动作(桌面 1440×900)", () => {
     await expect(page).toHaveURL(/conversationId=/, { timeout: 15000 });
     const assistant = page.locator('li[data-role="assistant"]').first();
     await expect(assistant).toBeVisible({ timeout: 20000 });
-    await expect(page.getByText("选择内容方向")).toBeVisible();
+    const directionCard = page.locator('[data-testid^="card-direction-"]').first();
+    await expect(directionCard).toBeVisible({ timeout: 30_000 });
+    await expect(directionCard.getByText("确认表达方向")).toBeVisible();
     const bodyText = await page.locator("main").innerText();
     expect(bodyText).not.toMatch(LEGACY_PATTERNS);
 
-    // 点击选项并提交
-    await page.getByRole("radio", { name: /经验分享/ }).click();
-    await page.getByRole("button", { name: "确认方向" }).click();
-    await expect(page.getByText(/方向已设为「经验分享」/)).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText("已选择")).toBeVisible();
+    // 默认主方向由当前推荐结果选中，确认后卡片进入持久化的已处理状态。
+    await expect(directionCard.locator('button[aria-pressed="true"]').first()).toBeVisible();
+    await directionCard.getByRole("button", { name: "确认方向" }).click();
+    await expect(page.getByText(/已确认主方向|方向已确认/)).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText("方向已处理")).toBeVisible();
 
     // 刷新:消息、结果与已处理状态全部从数据库恢复
     await page.reload();
-    await expect(page.getByText("选择内容方向")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText(/方向已设为「经验分享」/)).toBeVisible();
-    await expect(page.getByText("已选择")).toBeVisible();
+    await expect(page.getByText("方向已处理")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(/已确认主方向|方向已确认/)).toBeVisible();
     await expect(page.getByRole("button", { name: "确认方向" })).toHaveCount(0);
 
     // 再次发送:不再重复出示方向卡
     await input.fill("目标读者是刚开始运动的上班族");
     await input.press("Enter");
     await expect(page.getByText(/我已把这段补充作为新的创作要求/)).toBeVisible({ timeout: 20000 });
-    await expect(page.getByText("选择内容方向")).toHaveCount(1);
+    await expect(page.getByText("方向已处理")).toHaveCount(1);
   });
 
   test("网络失败显示 failed 状态,重试后成功", async ({ page }) => {

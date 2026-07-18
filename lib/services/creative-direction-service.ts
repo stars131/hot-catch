@@ -313,6 +313,48 @@ export async function confirmCreativeDirectionDecision(input: {
   return { selection, snapshot };
 }
 
+/** Return the conversation's active confirmed direction as an immutable selection/snapshot pair. */
+export async function getLatestConfirmedCreativeDirection(input: {
+  userId: string;
+  conversationId: string;
+}): Promise<{ selection: DirectionSelection; snapshot: DirectionSnapshot } | null> {
+  const decision = await prisma.creativeDirectionDecision.findFirst({
+    where: {
+      userId: input.userId,
+      conversationId: input.conversationId,
+      status: "confirmed",
+    },
+    orderBy: [{ confirmedAt: "desc" }, { updatedAt: "desc" }],
+  });
+  if (!decision?.selectedPrimary) return null;
+
+  const analysis = parseAnalysis(decision.analysis);
+  const primaryManifest = directionManifestSchema.parse(decision.selectedPrimary);
+  const secondaryManifest = decision.selectedSecondary
+    ? directionManifestSchema.parse(decision.selectedSecondary)
+    : undefined;
+  const referenceFor = (manifest: DirectionManifest): DirectionRef =>
+    analysis.recommendations.find((item) =>
+      item.ref.key === manifest.key && item.ref.version === manifest.version
+    )?.ref ?? {
+      key: manifest.key,
+      version: manifest.version,
+      source: "catalog",
+    };
+  const selection = directionSelectionSchema.parse({
+    decisionId: decision.id,
+    primary: referenceFor(primaryManifest),
+    ...(secondaryManifest ? { secondary: referenceFor(secondaryManifest) } : {}),
+  });
+  const snapshot = await resolveDirectionSelectionSnapshot({
+    userId: input.userId,
+    conversationId: input.conversationId,
+    selection,
+    analysis,
+  });
+  return { selection, snapshot };
+}
+
 export async function resolveDirectionSelectionSnapshot(input: {
   userId: string;
   conversationId: string;

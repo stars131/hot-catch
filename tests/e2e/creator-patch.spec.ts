@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test, expect, type Page } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
+import { fixtureChecksum } from "./helpers/checksum";
 
 /**
  * C7 修改提案(content.propose_patch)端到端验证。
@@ -104,7 +105,7 @@ async function seedConversation(tag: string) {
       bodyText: XHS_BODY,
       structuredContent: XHS_STRUCTURED,
       fullMarkdown: `# ${XHS_TITLE}\n\n${XHS_BODY}`,
-      checksum: `seed-c7-${tag}-${runId}`,
+      checksum: fixtureChecksum(`seed-c7-${tag}-${runId}`),
     },
   });
   await prisma.message.create({
@@ -190,7 +191,7 @@ test.describe("C7 修改提案(桌面 1440×900)", () => {
     await askRefineBody(page, panel, 16);
     const composer = page.getByLabel("创作输入框");
     await expect(composer).toHaveValue(/^请修改完整正文.+选中的这段/);
-    await expect(page.getByTestId("composer-chips")).toContainText("修改:完整正文");
+    await expect(page.getByTestId("composer-chips")).toContainText("修改：完整正文");
 
     // 2. 技能菜单来自内置注册表;选「压缩精简」替换指令并绑定 skillId
     await page.getByLabel("添加资料或技能").click();
@@ -201,7 +202,7 @@ test.describe("C7 修改提案(桌面 1440×900)", () => {
     await expect(skillList).toContainText("风险与合规检查");
     await page.getByTestId("composer-skill-builtin.compress-text").click();
     await expect(composer).toHaveValue("请压缩完整正文,保留核心信息:");
-    await expect(page.getByTestId("composer-chips")).toContainText("修改:完整正文");
+    await expect(page.getByTestId("composer-chips")).toContainText("修改：完整正文");
 
     // 3. 发送 → 补丁提案卡:区块/版本/本地协议预览标注/修改前后
     await composer.press("Enter");
@@ -325,7 +326,7 @@ test.describe("C7 修改提案(手机 390×844)", () => {
     await expect(page.getByTestId("artifact-panel")).toBeHidden();
     const composer = page.getByLabel("创作输入框");
     await expect(composer).toBeVisible();
-    await expect(page.getByTestId("composer-chips")).toContainText("修改:完整正文");
+    await expect(page.getByTestId("composer-chips")).toContainText("修改：完整正文");
 
     // 技能菜单可打开且不溢出
     // (Next.js dev 指示器悬浮在左下角,仅存在于开发模式,会挡住 + 按钮;测试中移除)

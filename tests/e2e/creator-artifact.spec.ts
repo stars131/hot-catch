@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test, expect, type Page } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
+import { fixtureChecksum } from "./helpers/checksum";
 
 /**
  * C5 Artifact 成果块与桌面侧栏端到端验证。
@@ -63,7 +64,7 @@ async function insertExternalGeneratedRevision(title: string, body: string) {
       bodyText: body,
       structuredContent: structuredFor(title, body),
       fullMarkdown: `# ${title}\n\n${body}`,
-      checksum: `seed-${runId}-${Math.random().toString(36).slice(2)}`,
+      checksum: fixtureChecksum(`seed-${runId}-${Math.random().toString(36).slice(2)}`),
     },
   });
 }
@@ -138,7 +139,7 @@ test.beforeAll(async () => {
       bodyText: SEED_BODY,
       structuredContent: structuredFor(SEED_TITLE, SEED_BODY),
       fullMarkdown: `# ${SEED_TITLE}\n\n${SEED_BODY}`,
-      checksum: `seed-${runId}-v1`,
+      checksum: fixtureChecksum(`seed-${runId}-v1`),
     },
   });
 

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test, expect, type Page } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
+import { fixtureChecksum } from "./helpers/checksum";
 
 /**
  * C10 本地发布执行状态机端到端验证。
@@ -108,7 +109,7 @@ test.beforeAll(async () => {
       title: CONTENT_TITLE,
       bodyText: "C10 本地发布状态机演示文案。",
       structuredContent: { shots: [] },
-      checksum: `c10-e2e-${Date.now()}`,
+      checksum: fixtureChecksum(`c10-e2e-${Date.now()}`),
     },
   });
 });

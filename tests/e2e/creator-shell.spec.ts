@@ -146,7 +146,8 @@ test.describe("C2 创作壳层(手机 390×844)", () => {
     const mobileNav = page.getByRole("navigation", { name: "移动端主导航" });
     await expect(mobileNav).toBeVisible();
     await expect(mobileNav.getByText("热点")).toBeVisible();
-    await expect(mobileNav.getByText("复盘")).toBeVisible();
+    await expect(mobileNav.getByText("编辑")).toBeVisible();
+    await expect(mobileNav.getByText("发布")).toBeVisible();
     // 桌面限定文案不得出现
     await expect(page.getByText(/右侧内容画布/)).toHaveCount(0);
     expect(errors).toEqual([]);

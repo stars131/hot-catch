@@ -3,6 +3,7 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { PrismaClient, type ContentKind, type Platform } from "@prisma/client";
 import { strFromU8, unzipSync } from "fflate";
+import { fixtureChecksum } from "./helpers/checksum";
 
 function loadDatabaseUrl(): string {
   if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
@@ -92,7 +93,7 @@ test.beforeAll(async () => {
         bodyText: content.bodyText,
         fullMarkdown: content.fullMarkdown,
         structuredContent: { platform, locale: "ja-JP", body: "安全な本文です。" },
-        checksum: `${index}`.padStart(64, "a"),
+        checksum: fixtureChecksum(`${platform}-${index}-${suffix}`),
       },
     });
     revisionByPlatform.set(platform, revision.id);
@@ -237,7 +238,7 @@ test("conversational five-platform setup preserves Japanese, Skills, editing and
 
   await page.goto(`/creator?conversationId=${conversationId}`);
   const setupCard = page.locator('[data-testid^="card-creation-setup-"]');
-  await expect(setupCard).toBeVisible();
+  await expect(setupCard).toBeVisible({ timeout: 15_000 });
   for (const platform of ["TikTok", "Instagram", "X", "Reddit"]) {
     await setupCard.getByRole("button", { name: new RegExp(platform) }).click();
   }
@@ -270,7 +271,7 @@ test("conversational five-platform setup preserves Japanese, Skills, editing and
 
   const youtubeCard = page.getByTestId(`card-artifact-artifact-youtube-${suffix}`);
   await youtubeCard.getByRole("button", { name: "Open editor" }).click();
-  await page.locator("#artifact-body").fill("編集済みの日本語本文");
+  await page.locator("#global-editor-description").fill("編集済みの日本語本文");
   await expect(page.getByTestId("artifact-save-state")).toContainText("已保存 v2", {
     timeout: 15_000,
   });

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { defaultContentPublishSettings } from "@/lib/editor/publish-settings";
+import { fixtureChecksum } from "./helpers/checksum";
 
 const contentId = "editor-x-content";
 const originalPost = "A clear opening post for an X thread.";
@@ -33,7 +34,7 @@ const revision = {
     riskNotes: [],
   },
   fullMarkdown: `# ${summary.title}`,
-  checksum: "editor-checksum-1",
+  checksum: fixtureChecksum("editor-checksum-1"),
   provenance: null,
   createdAt: "2026-07-18T06:00:00.000Z",
 };
@@ -79,7 +80,7 @@ async function mockEditorApis(page: Page, onSettingsSave?: (body: unknown) => vo
           id: "editor-x-revision-2",
           revisionNumber: 2,
           source: "manual",
-          checksum: "editor-checksum-2",
+          checksum: fixtureChecksum("editor-checksum-2"),
           createdAt: "2026-07-18T07:00:00.000Z",
         },
       } });

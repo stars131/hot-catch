@@ -32,7 +32,11 @@ import { createPendingInteraction } from "@/lib/services/interaction-service";
 import { compactConversationIfNeeded } from "@/lib/services/conversation-history-service";
 import { createConversationContextVersion } from "@/lib/services/conversation-context-service";
 import { claimNextQueuedTurn, completeQueuedTurn } from "@/lib/services/queue-service";
-import { recommendCreativeDirections } from "@/lib/services/creative-direction-service";
+import {
+  getLatestConfirmedCreativeDirection,
+  recommendCreativeDirections,
+} from "@/lib/services/creative-direction-service";
+import { buildCreationSetupCard } from "@/lib/creator/creation-setup";
 
 /**
  * C3 Agent 服务:消息、卡片动作与 AgentRun 的唯一服务端入口。
@@ -150,6 +154,29 @@ export const buildDefaultReply: ReplyBuilder = async ({
   uiLocale = "zh-CN",
   sourceMessageId,
 }) => {
+  const confirmedDirection = await getLatestConfirmedCreativeDirection({
+    userId,
+    conversationId,
+  });
+  if (confirmedDirection) {
+    const zh = uiLocale === "zh-CN";
+    return {
+      text: zh
+        ? "我已把这段补充作为新的创作要求。请在卡片里确认本次平台、内容语言和 Skill。"
+        : "I’ve added this as a new creation requirement. Confirm the platforms, content language and Skills below.",
+      cards: [await buildCreationSetupCard({
+        userId,
+        conversationId,
+        brief: text,
+        directionSelection: confirmedDirection.selection,
+        directionSnapshot: confirmedDirection.snapshot,
+        uiLocale,
+        nonce: sourceMessageId ?? `${Date.now()}:${text}`,
+      })],
+      command: "content.create",
+    };
+  }
+
   const result = await recommendCreativeDirections({
     userId,
     conversationId,

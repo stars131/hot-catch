@@ -65,14 +65,6 @@ export function DirectionRecommendationCardView(props: {
   const disabled = processed || props.state.phase === "loading";
 
   useEffect(() => {
-    setPrimary(props.card.recommendations[0]?.ref ?? null);
-    setSecondary(getVisibleSuggestedSecondary(props.card.recommendations));
-    setAnswers({});
-    setExpanded(false);
-    setQuery("");
-  }, [props.card.id, props.card.recommendations]);
-
-  useEffect(() => {
     if (!expanded) return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {

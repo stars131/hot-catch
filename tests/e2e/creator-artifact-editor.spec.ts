@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test, expect, type Page } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
+import { fixtureChecksum } from "./helpers/checksum";
 
 /**
  * C6 结构化编辑器端到端验证。
@@ -210,7 +211,7 @@ test.beforeAll(async () => {
       bodyText: XHS_BODY,
       structuredContent: XHS_STRUCTURED,
       fullMarkdown: `# ${XHS_TITLE}\n\n${XHS_BODY}`,
-      checksum: `seed-c6-xhs-${runId}`,
+      checksum: fixtureChecksum(`seed-c6-xhs-${runId}`),
     },
   });
 
@@ -240,7 +241,7 @@ test.beforeAll(async () => {
       bodyText: DOUYIN_CAPTION,
       structuredContent: DOUYIN_STRUCTURED,
       fullMarkdown: `# ${DOUYIN_TITLE}\n\n${DOUYIN_CAPTION}`,
-      checksum: `seed-c6-douyin-${runId}`,
+      checksum: fixtureChecksum(`seed-c6-douyin-${runId}`),
     },
   });
 

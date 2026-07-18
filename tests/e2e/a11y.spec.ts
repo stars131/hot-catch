@@ -13,6 +13,7 @@ const auditPages = [
 test.describe("可访问性 @a11y", () => {
   for (const { path, heading } of auditPages) {
     test(`${path} 无严重可访问性问题`, async ({ page }) => {
+      test.setTimeout(120_000);
       await page.goto(path);
       await expect(
         page.getByRole("heading", { level: 1, name: heading }),

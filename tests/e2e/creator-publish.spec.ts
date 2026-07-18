@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test, expect, type Page } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
+import { fixtureChecksum } from "./helpers/checksum";
 
 /**
  * C8 发布确认与移交端到端验证。
@@ -112,7 +113,7 @@ async function seedConversation(tag: string, options?: { blocked?: boolean }) {
         ? { ...XHS_STRUCTURED, title: "", bodyText: "", pages: [], tags: [] }
         : XHS_STRUCTURED,
       fullMarkdown: blocked ? "" : `# ${XHS_TITLE}\n\n${XHS_BODY}`,
-      checksum: `seed-c8-${tag}-${runId}`,
+      checksum: fixtureChecksum(`seed-c8-${tag}-${runId}`),
     },
   });
   await prisma.message.create({

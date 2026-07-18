@@ -28,6 +28,13 @@ async function createCardMessage(conversationId: string, cards: ChatCard[]) {
   });
 }
 
+async function createDirectionConversation(label: string) {
+  const conversation = await prisma.conversation.create({
+    data: { userId: userAId, title: `${label} ${runId}` },
+  });
+  return conversation.id;
+}
+
 const approvalCard: ChatCard = {
   id: "card-approve-demo",
   version: 1,
@@ -134,20 +141,21 @@ describe("clientMessageId 幂等与刷新重放", () => {
 
 describe("方向推荐卡动作", () => {
   it("确认推荐方向创建结果消息", async () => {
+    const conversationId = await createDirectionConversation("方向确认");
     const reply = await buildDefaultReply({
       userId: userAId,
-      conversationId: convAId,
+      conversationId,
       text: "写点什么",
     });
     const directionCard = reply.cards[0];
     expect(directionCard.type).toBe("direction_recommendation");
     if (directionCard.type !== "direction_recommendation") throw new Error("expected direction card");
-    const source = await createCardMessage(convAId, [directionCard]);
+    const source = await createCardMessage(conversationId, [directionCard]);
     const primary = directionCard.recommendations[0].ref;
 
     const result = await invokeCardAction({
       userId: userAId,
-      conversationId: convAId,
+      conversationId,
       clientActionId: `ca-opt-${runId}`,
       sourceMessageId: source.id,
       cardId: directionCard.id,
@@ -156,24 +164,35 @@ describe("方向推荐卡动作", () => {
     });
     expect(result.replayed).toBe(false);
     expect(result.resultMessage.content.length).toBeGreaterThan(0);
+
+    const followup = await handleUserMessage({
+      userId: userAId,
+      conversationId,
+      text: "目标读者是刚开始运动的上班族",
+      clientMessageId: `cm-direction-followup-${runId}`,
+    });
+    expect(followup.assistantMessage?.content).toContain("新的创作要求");
+    expect(JSON.stringify(followup.assistantMessage?.metadata)).toContain("creation_setup");
+    expect(JSON.stringify(followup.assistantMessage?.metadata)).not.toContain("direction_recommendation");
   });
 
   it("已处理动作再次点击(新的 clientActionId)返回第一次结果", async () => {
+    const conversationId = await createDirectionConversation("方向幂等");
     const reply = await buildDefaultReply({
       userId: userAId,
-      conversationId: convAId,
+      conversationId,
       text: "写点什么",
     });
     const directionCard = reply.cards[0];
     expect(directionCard.type).toBe("direction_recommendation");
     if (directionCard.type !== "direction_recommendation") throw new Error("expected direction card");
     const card = { ...directionCard, id: `card-direction-2-${runId.slice(-6)}` };
-    const source = await createCardMessage(convAId, [card]);
+    const source = await createCardMessage(conversationId, [card]);
     const primary = card.recommendations[0].ref;
 
     const first = await invokeCardAction({
       userId: userAId,
-      conversationId: convAId,
+      conversationId,
       clientActionId: `ca-first-${runId}`,
       sourceMessageId: source.id,
       cardId: card.id,
@@ -182,7 +201,7 @@ describe("方向推荐卡动作", () => {
     });
     const second = await invokeCardAction({
       userId: userAId,
-      conversationId: convAId,
+      conversationId,
       clientActionId: `ca-second-${runId}`,
       sourceMessageId: source.id,
       cardId: card.id,
