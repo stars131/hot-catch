@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { env } from "@/lib/env";
+import { selectedSkillIdsSchema } from "@/lib/validators/skills";
 
 export const analyzeSchema = z.object({
   accountIds: z
@@ -24,6 +25,7 @@ export const generateContentSchema = z.object({
     .default([]),
   outputType: z.string().default("xhs_graphic"),
   conversationId: z.string().cuid().optional().nullable(),
+  skillIds: selectedSkillIdsSchema.optional(),
 });
 
 export const saveContentSchema = z.object({

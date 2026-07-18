@@ -1,0 +1,7 @@
+{
+  "code": 0,
+  "data": {
+    "url": "https://auth.aitoearn.test/oauth/xiaohongshu?state=fixture-state",
+    "sessionId": "auth-session-fixture-1"
+  }
+}

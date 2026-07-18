@@ -27,6 +27,20 @@ export const personaSchema = z.object({
   personalWeaknesses: z.string().max(1000).optional().nullable(),
   sustainableTopics: z.string().max(1000).optional().nullable(),
   isDefault: z.boolean().optional(),
+  socialConnectionId: z.string().cuid().optional().nullable(),
+  status: z.enum(["draft", "active", "archived"]).optional(),
+  source: z.enum(["manual", "imported", "memory_assisted"]).optional(),
+  previousVersionId: z.string().cuid().optional().nullable(),
 });
+
+export const personaVersionActionSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("activate"), personaId: z.string().cuid() }),
+  z.object({ action: z.literal("archive"), personaId: z.string().cuid() }),
+  z.object({
+    action: z.literal("copy"),
+    personaId: z.string().cuid(),
+    socialConnectionId: z.string().cuid().optional().nullable(),
+  }),
+]);
 
 export type PersonaInput = z.infer<typeof personaSchema>;

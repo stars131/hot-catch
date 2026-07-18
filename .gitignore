@@ -11,6 +11,9 @@
 # production
 /build
 /dist
+/coverage
+/test-results
+/playwright-report
 
 # misc
 .DS_Store
@@ -28,6 +31,7 @@ yarn-error.log*
 .env*.local
 .env.development
 .env.production
+.hotspot-cookies.local.json
 
 # typescript
 *.tsbuildinfo

@@ -16,7 +16,7 @@ import { mockAdapter } from "@/lib/xhs/adapters/mock-adapter";
 import { thirdPartyAdapter } from "@/lib/xhs/adapters/third-party-adapter";
 import { publicPageAdapter } from "@/lib/xhs/adapters/public-page-adapter";
 import { manualFallbackAdapter } from "@/lib/xhs/adapters/manual-fallback-adapter";
-import type { InputType, Prisma } from "@prisma/client";
+import type { BenchmarkAccount, InputType, Prisma } from "@prisma/client";
 
 export type ManualTemplate = {
   profileDescription: string;
@@ -49,6 +49,11 @@ export type XhsFetchServiceResult = {
   sourceType: string;
   dataConfidence: number;
   cached?: boolean;
+};
+
+type AccountIdentity = {
+  xhsIds: string[];
+  profileUrls: string[];
 };
 
 function getAdapterChain(): XhsDataAdapter[] {
@@ -107,6 +112,126 @@ function toManualTemplate(): ManualTemplate {
     learningReason: "",
     requiredFields: MANUAL_REQUIRED_FIELDS,
   };
+}
+
+function normalizeXhsId(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function canonicalizeProfileUrl(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+
+  try {
+    const url = new URL(trimmed);
+    url.search = "";
+    url.hash = "";
+    url.pathname = url.pathname.replace(/\/+$/, "");
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    const fallback = trimmed.replace(/[?#].*$/, "").replace(/\/+$/, "");
+    return fallback || null;
+  }
+}
+
+function uniqueValues(values: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(values.filter(Boolean) as string[]));
+}
+
+function buildAccountIdentity(
+  account: ReturnType<typeof normalizeAccount>,
+  input?: XhsFetchInput
+): AccountIdentity {
+  return {
+    xhsIds: uniqueValues([
+      normalizeXhsId(account.xhsId),
+      input?.type === "xhs_id" ? normalizeXhsId(input.value) : null,
+    ]),
+    profileUrls: uniqueValues([
+      canonicalizeProfileUrl(account.profileUrl),
+      input?.type === "profile_url" ? canonicalizeProfileUrl(input.value) : null,
+    ]),
+  };
+}
+
+function hasAccountIdentity(identity: AccountIdentity): boolean {
+  return Boolean(identity.xhsIds.length || identity.profileUrls.length);
+}
+
+function accountMatchesIdentity(account: BenchmarkAccount, identity: AccountIdentity): boolean {
+  const accountXhsId = normalizeXhsId(account.xhsId);
+  const accountProfileUrl = canonicalizeProfileUrl(account.profileUrl);
+  return Boolean(
+    (accountXhsId && identity.xhsIds.includes(accountXhsId)) ||
+      (accountProfileUrl && identity.profileUrls.includes(accountProfileUrl))
+  );
+}
+
+async function findAccountsByIdentity(userId: string, identity: AccountIdentity) {
+  if (!hasAccountIdentity(identity)) return [];
+
+  const accounts = await prisma.benchmarkAccount.findMany({
+    where: {
+      userId,
+      OR: [{ xhsId: { not: null } }, { profileUrl: { not: null } }],
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+  return accounts.filter((account) => accountMatchesIdentity(account, identity));
+}
+
+function pickSurvivor(accounts: BenchmarkAccount[]) {
+  return [...accounts].sort((a, b) => {
+    if (a.isArchived !== b.isArchived) return a.isArchived ? 1 : -1;
+    if (a.isFavorite !== b.isFavorite) return a.isFavorite ? -1 : 1;
+    return b.updatedAt.getTime() - a.updatedAt.getTime();
+  })[0];
+}
+
+function firstExistingText(values: Array<string | null | undefined>) {
+  return values.find((value) => value?.trim()) ?? null;
+}
+
+function mergeFetchedAccountData(params: {
+  existing?: BenchmarkAccount;
+  duplicates?: BenchmarkAccount[];
+  account: ReturnType<typeof normalizeAccount>;
+  result: XhsFetchResult;
+  input: XhsFetchInput;
+}) {
+  const { existing, duplicates = [], account, result, input } = params;
+  const profileUrl = canonicalizeProfileUrl(account.profileUrl);
+  const sourceUrl =
+    input.type !== "xhs_id" ? canonicalizeProfileUrl(input.value) : profileUrl;
+
+  const data = {
+    xhsId: normalizeXhsId(account.xhsId) ?? existing?.xhsId ?? null,
+    nickname: account.nickname ?? existing?.nickname ?? null,
+    avatarUrl: account.avatarUrl ?? existing?.avatarUrl ?? null,
+    profileUrl: profileUrl ?? existing?.profileUrl ?? null,
+    description: account.description ?? existing?.description ?? null,
+    category: account.category ?? existing?.category ?? null,
+    followerCount: account.followerCount ?? existing?.followerCount ?? null,
+    followingCount: account.followingCount ?? existing?.followingCount ?? null,
+    likedCount: account.likedCount ?? existing?.likedCount ?? null,
+    noteCount: account.noteCount ?? existing?.noteCount ?? null,
+    sourceType: result.sourceType,
+    sourceUrl: sourceUrl ?? existing?.sourceUrl ?? null,
+    dataConfidence: result.dataConfidence,
+    lastFetchedAt: new Date(),
+    fetchStatus: "success" as const,
+    isArchived: false,
+    isFavorite: existing?.isFavorite || duplicates.some((duplicate) => duplicate.isFavorite),
+    userRemark:
+      existing?.userRemark ?? firstExistingText(duplicates.map((duplicate) => duplicate.userRemark)),
+    groupName:
+      existing?.groupName ?? firstExistingText(duplicates.map((duplicate) => duplicate.groupName)),
+  };
+
+  return result.rawData === undefined
+    ? data
+    : { ...data, rawData: result.rawData as Prisma.InputJsonValue };
 }
 
 export async function fetchAndSaveXhs(params: {
@@ -202,18 +327,36 @@ async function findFreshCachedAccount(userId: string, input: XhsFetchInput) {
   const cacheMs = env.XHS_FETCH_CACHE_HOURS * 3600 * 1000;
   if (cacheMs <= 0) return null;
   const since = new Date(Date.now() - cacheMs);
-  return prisma.benchmarkAccount.findFirst({
-    where: {
-      userId,
-      isArchived: false,
-      fetchStatus: "success",
-      lastFetchedAt: { gte: since },
-      ...(input.type === "xhs_id"
-        ? { xhsId: input.value }
-        : { profileUrl: input.value }),
+  const identity = buildAccountIdentity(
+    {
+      xhsId: input.type === "xhs_id" ? input.value : null,
+      profileUrl: input.type === "profile_url" ? input.value : null,
+      nickname: null,
+      avatarUrl: null,
+      description: null,
+      category: null,
+      followerCount: null,
+      followingCount: null,
+      likedCount: null,
+      noteCount: null,
     },
-    orderBy: { lastFetchedAt: "desc" },
-  });
+    input
+  );
+  const matches = await findAccountsByIdentity(userId, identity);
+  return (
+    matches
+      .filter(
+        (account) =>
+          !account.isArchived &&
+          account.fetchStatus === "success" &&
+          account.lastFetchedAt &&
+          account.lastFetchedAt >= since
+      )
+      .sort(
+        (a, b) =>
+          (b.lastFetchedAt?.getTime() ?? 0) - (a.lastFetchedAt?.getTime() ?? 0)
+      )[0] ?? null
+  );
 }
 
 async function upsertAccount(
@@ -222,31 +365,64 @@ async function upsertAccount(
   input: XhsFetchInput
 ) {
   const acc = normalizeAccount(result.account!);
-  const existing = await prisma.benchmarkAccount.findFirst({
-    where: {
-      userId,
-      OR: [
-        acc.xhsId ? { xhsId: acc.xhsId } : undefined,
-        acc.profileUrl ? { profileUrl: acc.profileUrl } : undefined,
-      ].filter(Boolean) as Prisma.BenchmarkAccountWhereInput[],
-    },
-  });
+  const identity = buildAccountIdentity(acc, input);
+  const matches = await findAccountsByIdentity(userId, identity);
 
-  const data = {
-    ...acc,
-    rawData: (result.rawData as Prisma.InputJsonValue) ?? undefined,
-    sourceType: result.sourceType,
-    sourceUrl: input.type !== "xhs_id" ? input.value : acc.profileUrl,
-    dataConfidence: result.dataConfidence,
-    lastFetchedAt: new Date(),
-    fetchStatus: "success" as const,
-    isArchived: false,
-  };
+  if (matches.length) {
+    const survivor = pickSurvivor(matches);
+    const duplicates = matches.filter((account) => account.id !== survivor.id);
+    const data = mergeFetchedAccountData({
+      existing: survivor,
+      duplicates,
+      account: acc,
+      result,
+      input,
+    });
 
-  if (existing) {
-    return prisma.benchmarkAccount.update({ where: { id: existing.id }, data });
+    return prisma.$transaction(async (tx) => {
+      await mergeDuplicateAccountNotes(tx, survivor.id, duplicates);
+      if (duplicates.length) {
+        await tx.benchmarkAccount.updateMany({
+          where: { id: { in: duplicates.map((account) => account.id) } },
+          data: { isArchived: true },
+        });
+      }
+      return tx.benchmarkAccount.update({ where: { id: survivor.id }, data });
+    });
   }
+
+  const data = mergeFetchedAccountData({ account: acc, result, input });
   return prisma.benchmarkAccount.create({ data: { userId, ...data } });
+}
+
+async function mergeDuplicateAccountNotes(
+  tx: Prisma.TransactionClient,
+  survivorId: string,
+  duplicates: BenchmarkAccount[]
+) {
+  for (const duplicate of duplicates) {
+    const notes = await tx.benchmarkNote.findMany({
+      where: { accountId: duplicate.id },
+    });
+    for (const note of notes) {
+      const existing = note.noteId
+        ? await tx.benchmarkNote.findFirst({
+            where: { accountId: survivorId, noteId: note.noteId },
+          })
+        : note.noteUrl
+          ? await tx.benchmarkNote.findFirst({
+              where: { accountId: survivorId, noteUrl: note.noteUrl },
+            })
+          : null;
+
+      if (!existing) {
+        await tx.benchmarkNote.update({
+          where: { id: note.id },
+          data: { accountId: survivorId },
+        });
+      }
+    }
+  }
 }
 
 async function saveNotes(accountId: string, result: XhsFetchResult) {

@@ -1,0 +1,140 @@
+name: startrace
+
+x-app-env: &app-env
+  NODE_ENV: production
+  DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+  REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+  NEXT_PUBLIC_APP_URL: https://${DOMAIN}
+  AUTH_URL: https://${DOMAIN}
+  AUTH_SECRET: ${AUTH_SECRET}
+  AUTH_RESEND_KEY: ${AUTH_RESEND_KEY}
+  AUTH_EMAIL_FROM: ${AUTH_EMAIL_FROM}
+  DEV_AUTH_BYPASS: "0"
+  CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY}
+  WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+  DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+  DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+  TIKHUB_BASE_URL: ${TIKHUB_BASE_URL:-https://api.tikhub.io}
+  DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+  AITO_EARN_BASE_URL: ${AITO_EARN_BASE_URL:-https://aitoearn.cn}
+  FIRECRAWL_BASE_URL: ${FIRECRAWL_BASE_URL:-https://api.firecrawl.dev}
+  MEDIA_TEMP_ROOT: /tmp/startrace
+  MEDIA_DOWNLOAD_MAX_MB: ${MEDIA_DOWNLOAD_MAX_MB:-500}
+  PROVIDER_TIMEOUT_MS: ${PROVIDER_TIMEOUT_MS:-30000}
+  XHS_FETCH_PROVIDER: public_page
+  FOREIGN_PLATFORM_CREATION_ENABLED: ${FOREIGN_PLATFORM_CREATION_ENABLED:-0}
+  UI_I18N_ENABLED: ${UI_I18N_ENABLED:-1}
+
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a '${REDIS_PASSWORD}' ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: worker
+    environment: *app-env
+    command: ["npx", "prisma", "migrate", "deploy"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: production
+    restart: unless-stopped
+    environment: *app-env
+    expose:
+      - "3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 20s
+
+  worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: worker
+    restart: unless-stopped
+    environment: *app-env
+    tmpfs:
+      - /tmp/startrace:size=2g,mode=0700,uid=1000,gid=1000
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./backup-postgres.sh:/backup-postgres.sh:ro
+      - ./backups:/backups
+    command: ["sh", "-c", "while true; do sh /backup-postgres.sh; sleep 86400; done"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:

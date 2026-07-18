@@ -1,0 +1,20 @@
+import { NextRequest } from "next/server";
+import { requireUser } from "@/lib/auth";
+import { getAgentRunForUser } from "@/lib/creator/agent-service";
+import { ok, fail } from "@/lib/http";
+
+export const runtime = "nodejs";
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const user = await requireUser();
+    const { id } = await params;
+    const run = await getAgentRunForUser(user.id, id);
+    return ok({ run });
+  } catch (error) {
+    return fail(error);
+  }
+}

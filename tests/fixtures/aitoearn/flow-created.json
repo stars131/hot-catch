@@ -1,0 +1,17 @@
+{
+  "data": {
+    "flowId": "9b0d418e-7b06-42f4-bf16-e446bde72cf4",
+    "tasks": [
+      {
+        "id": "6a423ff4ff7bb08a379a735c",
+        "platform": "douyin",
+        "accountId": "douyin_test_account",
+        "status": 0,
+        "publishTime": "2026-06-29T09:43:42.000Z"
+      }
+    ]
+  },
+  "code": 0,
+  "message": "请求成功",
+  "requestId": "fixture-request"
+}

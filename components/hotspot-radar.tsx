@@ -41,7 +41,7 @@ export type HotspotPlatform =
   | "虎扑"
   | "V2EX"
   | "HelloGitHub"
-  | "360搜索"
+  | "凤凰网"
   | "搜狗"
   | "新浪"
   | "豆瓣电影"
@@ -77,6 +77,7 @@ export type HotspotSourceHealth = {
   count: number;
   backend?: string;
   requiresCookie?: boolean;
+  supportsOptionalConnection?: boolean;
   cookieConfigured?: boolean;
   message?: string;
 };
@@ -696,9 +697,9 @@ function SourceHealthStrip(props: { sources: HotspotSourceHealth[] }) {
             <span className={cn("h-1.5 w-1.5", source.ok ? "bg-[#b6ff3b]" : "bg-amber-300")} />
             {source.platform}
             <span className="text-slate-500">{source.count}</span>
-            {source.requiresCookie ? (
+            {source.supportsOptionalConnection ? (
               <span className={cn("text-[10px]", source.cookieConfigured ? "text-[#b6ff3b]" : "text-amber-300")}>
-                Cookie
+                {source.cookieConfigured ? "已增强" : "公开"}
               </span>
             ) : null}
             {source.backend ? <span className="max-w-[92px] truncate text-slate-600">{source.backend}</span> : null}
