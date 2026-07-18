@@ -109,6 +109,33 @@ describe("credential-free hotspot sources", () => {
     });
   });
 
+  it("falls back to a documented public 60s mirror when the primary is rate limited", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "https://60s.viki.moe/v2/rednote") {
+        return jsonResponse({ message: "rate limited" }, 429);
+      }
+      if (url === "https://60s.crystelf.top/v2/rednote") {
+        return jsonResponse({
+          data: [{
+            title: "小红书镜像热点",
+            score: "7788",
+            link: "https://www.xiaohongshu.com/search_result?keyword=mirror",
+          }],
+        });
+      }
+      return jsonResponse({}, 503);
+    }));
+
+    const payload = await getHotspotSourcePayload("xiaohongshu");
+
+    expect(payload.health.ok).toBe(true);
+    expect(payload.items[0]).toMatchObject({
+      title: "小红书镜像热点",
+      backend: "60s 公共镜像",
+    });
+  });
+
   it("uses the no-key public fallback for Sogou", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

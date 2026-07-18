@@ -239,7 +239,10 @@ const ORZ_DAILY_NEWS_ENDPOINTS = [
   "https://news.orz.ai/api/v1/dailynews/",
 ];
 const DAILY_HOT_API_BASE = "https://api-hot.imsyy.top";
-const SIXTY_SECONDS_BASE = "https://60s.viki.moe/v2";
+const SIXTY_SECONDS_BASES = [
+  { baseUrl: "https://60s.viki.moe/v2", label: "60s" },
+  { baseUrl: "https://60s.crystelf.top/v2", label: "60s 公共镜像" },
+] as const;
 const NEWS_NOW_BASE = "https://newsnow.busiyi.world/api/s";
 const TUOCHENG_API_BASE = "https://api.tcslw.cn";
 
@@ -782,8 +785,23 @@ async function fetchDailyHotItems(source: HotspotSource): Promise<HotspotSourceI
 }
 
 async function fetchSixtySecondItems(source: HotspotSource): Promise<HotspotSourceItem[]> {
-  const json = await fetchJson<GenericHotResponse>(`${SIXTY_SECONDS_BASE}/${source.sixtyRoute}`, "60s");
-  return normalizeItems(extractItemArray(json), source, "60s");
+  let lastError: unknown;
+  for (const endpoint of SIXTY_SECONDS_BASES) {
+    try {
+      const json = await fetchJson<GenericHotResponse>(
+        `${endpoint.baseUrl}/${source.sixtyRoute}`,
+        endpoint.label,
+      );
+      const items = normalizeItems(extractItemArray(json), source, endpoint.label);
+      if (items.length > 0) return items;
+      throw new Error(`${endpoint.label}: empty response`);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`${source.label} 60s fetch failed`);
 }
 
 async function fetchNewsNowItems(source: HotspotSource): Promise<HotspotSourceItem[]> {
