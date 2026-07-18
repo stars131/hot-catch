@@ -129,4 +129,26 @@ describe("credential-free hotspot sources", () => {
       backend: "驼城API",
     });
   });
+
+  it("uses the no-key public fallback for Sina", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "https://api.tcslw.cn/api/hotlist/sina?type=search") {
+        return jsonResponse({
+          success: true,
+          data: [{ title: "Sina public trend", hot: "3840000", url: "https://search.sina.com.cn/?q=test" }],
+        });
+      }
+      return jsonResponse({}, 503);
+    }));
+
+    const payload = await getHotspotSourcePayload("sina");
+
+    expect(payload.health.ok).toBe(true);
+    expect(payload.source.publicBackends).toContain("驼城API");
+    expect(payload.items[0]).toMatchObject({
+      title: "Sina public trend",
+      backend: "驼城API",
+    });
+  });
 });

@@ -514,7 +514,7 @@ const SOURCES: HotspotSource[] = [
   { code: "xiaohongshu", label: "小红书", category: "生活方式", color: "#ff2d55", weight: 0.92, sixtyRoute: "rednote", cookieBackend: true },
   { code: "ifeng", label: "凤凰网", category: "资讯热点", color: "#b91c1c", weight: 0.8, newsNowId: "ifeng", nativeFetcher: fetchNativeIfeng },
   { code: "sogou", label: "搜狗", category: "搜索热榜", color: "#f97316", weight: 0.78, tuochengPath: "/api/hotlist?type=sogou", cookieBackend: true },
-  { code: "sina", label: "新浪", category: "资讯热点", color: "#f43f5e", weight: 0.78, dailyHotRoute: "sina", cookieBackend: true, nativeFetcher: fetchNativeSina },
+  { code: "sina", label: "新浪", category: "资讯热点", color: "#f43f5e", weight: 0.78, dailyHotRoute: "sina", tuochengPath: "/api/hotlist/sina?type=search", cookieBackend: true, nativeFetcher: fetchNativeSina },
   { code: "douban-movie", label: "豆瓣电影", category: "文娱内容", color: "#22c55e", weight: 0.74, dailyHotRoute: "douban-movie", newsNowId: "douban", nativeFetcher: fetchNativeDoubanMovie },
 ];
 
