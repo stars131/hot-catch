@@ -24,6 +24,7 @@ export const config = {
     "/creator/:path*",
     "/hotspots/:path*",
     "/ideas/:path*",
+    "/editor/:path*",
     "/publish/:path*",
     "/retrospectives/:path*",
     "/personas/:path*",

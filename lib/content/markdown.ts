@@ -82,25 +82,43 @@ export function buildManualRevisionPayload(params: {
   const body = params.bodyText;
   const base = asRecord(params.baseStructuredContent);
   const hasStructure = base !== null;
+  let revisionBody = body;
 
   let structuredContent: Record<string, unknown> | undefined;
   if (hasStructure) {
     structuredContent = dropEmptyListEntries({ ...base, title: title || base.title });
     if (params.contentKind === "xhs_graphic") structuredContent.bodyText = body;
     else if (params.contentKind === "douyin_video_script") structuredContent.caption = body;
-    else structuredContent.bodyText = body;
+    else if (params.contentKind === "youtube_video_package") structuredContent.description = body;
+    else if (params.contentKind === "tiktok_short_video_script") structuredContent.caption = body;
+    else if (params.contentKind === "instagram_carousel") structuredContent.caption = body;
+    else if (params.contentKind === "reddit_post") structuredContent.bodyMarkdown = body;
+    else if (params.contentKind === "x_thread") {
+      revisionBody = recordArray(structuredContent.posts)
+        .map((post) => stringOf(post.text))
+        .filter(Boolean)
+        .join("\n\n");
+    }
   }
 
   return {
     title: title || null,
-    bodyText: body || null,
+    bodyText: revisionBody || null,
     structuredContent,
-    fullMarkdown: buildMarkdown(params.contentKind, title, body, structuredContent),
+    fullMarkdown: buildMarkdown(params.contentKind, title, revisionBody, structuredContent),
   };
 }
 
 /** 编辑器中的字符串列表允许暂存空行;保存时过滤,避免落库垃圾数据。 */
-const STRING_LIST_KEYS = ["tags", "riskNotes", "coverTextOptions", "titleOptions"] as const;
+const STRING_LIST_KEYS = [
+  "tags",
+  "hashtags",
+  "riskNotes",
+  "coverTextOptions",
+  "titleOptions",
+  "disclosureNotes",
+  "subredditSuggestions",
+] as const;
 
 function dropEmptyListEntries(
   structured: Record<string, unknown>,
@@ -156,6 +174,76 @@ function buildMarkdown(
         tags,
       });
     }
+  } else if (contentKind === "youtube_video_package") {
+    const sections = recordArray(structured?.sections);
+    const chapters = recordArray(structured?.chapters);
+    return [
+      `# ${title || "未命名"}`,
+      stringOf(structured?.thumbnailText) ? `**Thumbnail:** ${stringOf(structured?.thumbnailText)}` : "",
+      stringOf(structured?.hook) ? `**Hook:** ${stringOf(structured?.hook)}` : "",
+      ...sections.map((section) => [
+        `## ${timecode(numberOf(section.startSec, 0))}–${timecode(numberOf(section.endSec, 0))} ${stringOf(section.heading)}`,
+        stringOf(section.narration),
+        stringOf(section.visualDirection) ? `**Visual:** ${stringOf(section.visualDirection)}` : "",
+      ].filter(Boolean).join("\n\n")),
+      chapters.length ? `## Chapters\n\n${chapters.map((chapter) => `${timecode(numberOf(chapter.timeSec, 0))} ${stringOf(chapter.title)}`).join("\n")}` : "",
+      body ? `## Description\n\n${body}` : "",
+      stringArray(structured?.tags).length ? `## Tags\n\n${stringArray(structured?.tags).join(", ")}` : "",
+      stringOf(structured?.callToAction) ? `## CTA\n\n${stringOf(structured?.callToAction)}` : "",
+    ].filter(Boolean).join("\n\n");
+  } else if (contentKind === "tiktok_short_video_script") {
+    const shots = recordArray(structured?.shots);
+    return [
+      `# ${title || "未命名"}`,
+      stringOf(structured?.hook) ? `**Hook:** ${stringOf(structured?.hook)}` : "",
+      shots.length ? [
+        "| Time | Voiceover | Visual | On-screen text | Camera | Transition |",
+        "| --- | --- | --- | --- | --- | --- |",
+        ...shots.map((shot) => `| ${numberOf(shot.startSec, 0)}-${numberOf(shot.endSec, 0)}s | ${tableCell(shot.voiceover)} | ${tableCell(shot.visual)} | ${tableCell(shot.onScreenText)} | ${tableCell(shot.camera)} | ${tableCell(shot.transition)} |`),
+      ].join("\n") : "",
+      body ? `## Caption\n\n${body}` : "",
+      stringArray(structured?.hashtags).length ? `## Hashtags\n\n${stringArray(structured?.hashtags).map(hashTag).join(" ")}` : "",
+      stringOf(structured?.musicDirection) ? `## Music\n\n${stringOf(structured?.musicDirection)}` : "",
+      stringOf(structured?.callToAction) ? `## CTA\n\n${stringOf(structured?.callToAction)}` : "",
+    ].filter(Boolean).join("\n\n");
+  } else if (contentKind === "instagram_carousel") {
+    const slides = recordArray(structured?.slides);
+    return [
+      `# ${title || "未命名"}`,
+      stringOf(structured?.coverText) ? `**Cover:** ${stringOf(structured?.coverText)}` : "",
+      ...slides.map((slide, index) => [
+        `## Slide ${numberOf(slide.slideNumber, index + 1)}: ${stringOf(slide.heading)}`,
+        stringOf(slide.body),
+        stringOf(slide.visualDirection) ? `**Visual:** ${stringOf(slide.visualDirection)}` : "",
+        stringOf(slide.altText) ? `**Alt text:** ${stringOf(slide.altText)}` : "",
+      ].filter(Boolean).join("\n\n")),
+      body ? `## Caption\n\n${body}` : "",
+      stringArray(structured?.hashtags).length ? `## Hashtags\n\n${stringArray(structured?.hashtags).map(hashTag).join(" ")}` : "",
+      stringOf(structured?.callToAction) ? `## CTA\n\n${stringOf(structured?.callToAction)}` : "",
+    ].filter(Boolean).join("\n\n");
+  } else if (contentKind === "x_thread") {
+    const posts = recordArray(structured?.posts);
+    return [
+      `# ${title || "未命名"}`,
+      ...posts.map((post, index) => [
+        `## ${numberOf(post.index, index + 1)}/${posts.length}`,
+        stringOf(post.text),
+        stringOf(post.mediaSuggestion) ? `**Media:** ${stringOf(post.mediaSuggestion)}` : "",
+      ].filter(Boolean).join("\n\n")),
+      stringOf(structured?.callToAction) ? `## CTA\n\n${stringOf(structured?.callToAction)}` : "",
+    ].filter(Boolean).join("\n\n");
+  } else if (contentKind === "reddit_post") {
+    const communities = stringArray(structured?.subredditSuggestions);
+    return [
+      `# ${title || "未命名"}`,
+      stringOf(structured?.audience) ? `**Audience:** ${stringOf(structured?.audience)}` : "",
+      communities.length ? `**Suggested communities (verify rules manually):** ${communities.join(", ")}` : "",
+      body,
+      stringOf(structured?.tldr) ? `## TL;DR\n\n${stringOf(structured?.tldr)}` : "",
+      stringOf(structured?.discussionPrompt) ? `## Discussion prompt\n\n${stringOf(structured?.discussionPrompt)}` : "",
+      stringOf(structured?.flairSuggestion) ? `**Suggested flair:** ${stringOf(structured?.flairSuggestion)}` : "",
+      stringOf(structured?.disclosure) ? `**Disclosure:** ${stringOf(structured?.disclosure)}` : "",
+    ].filter(Boolean).join("\n\n");
   }
   return [`# ${title || "未命名"}`, body, tags.map((tag) => `#${tag}`).join(" ")]
     .filter((section) => section.trim().length > 0)
@@ -186,4 +274,22 @@ function stringOf(value: unknown): string {
 
 function numberOf(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function tableCell(value: unknown): string {
+  return String(value ?? "").replace(/\|/g, "\\|").replace(/\r?\n/g, "<br>");
+}
+
+function timecode(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainder = seconds % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`
+    : `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+function hashTag(value: string): string {
+  return value.startsWith("#") ? value : `#${value}`;
 }

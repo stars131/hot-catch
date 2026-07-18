@@ -260,7 +260,7 @@ export async function createGenerationBatch(params: {
       data: {
         content: allFailed
           ? "创作任务未能进入队列，请稍后重试。"
-          : `已创建 ${items.length} 个相互独立的平台创作任务。`,
+          : `已建立 ${items.length} 个相互独立的平台任务，正在生成内容。`,
         status: allFailed ? "failed" : "complete",
         metadata: metadata as unknown as Prisma.InputJsonValue,
       },

@@ -160,6 +160,55 @@ describe("buildManualRevisionPayload", () => {
     expect(payload.fullMarkdown).toContain("新文案");
   });
 
+  it("rebuilds an edited X thread and derives body text from its posts", () => {
+    const payload = buildManualRevisionPayload({
+      contentKind: "x_thread",
+      baseStructuredContent: {
+        title: "Thread",
+        posts: [
+          { index: 1, text: "Edited opening", mediaSuggestion: "Source map" },
+          { index: 2, text: "Edited conclusion", mediaSuggestion: "" },
+        ],
+        callToAction: "What would you verify?",
+      },
+      title: "Edited thread",
+      bodyText: "stale body from the generated revision",
+    });
+    expect(payload.bodyText).toBe("Edited opening\n\nEdited conclusion");
+    expect(payload.fullMarkdown).toContain("## 1/2\n\nEdited opening");
+    expect(payload.fullMarkdown).toContain("**Media:** Source map");
+    expect(payload.fullMarkdown).not.toContain("stale body");
+  });
+
+  it("keeps global platform body fields aligned with the structured content", () => {
+    const youtube = buildManualRevisionPayload({
+      contentKind: "youtube_video_package",
+      baseStructuredContent: {
+        title: "Video",
+        thumbnailText: "Watch this",
+        sections: [{ startSec: 0, endSec: 30, heading: "Opening", narration: "New narration", visualDirection: "Source map" }],
+        chapters: [{ timeSec: 0, title: "Opening" }],
+        description: "Old description",
+        tags: ["research"],
+      },
+      title: "Video",
+      bodyText: "New description",
+    });
+    expect((youtube.structuredContent as Record<string, unknown>).description).toBe("New description");
+    expect(youtube.fullMarkdown).toContain("New narration");
+    expect(youtube.fullMarkdown).toContain("## Description\n\nNew description");
+
+    const reddit = buildManualRevisionPayload({
+      contentKind: "reddit_post",
+      baseStructuredContent: { title: "Question", bodyMarkdown: "Old", subredditSuggestions: ["research", ""] },
+      title: "Question",
+      bodyText: "New Markdown body",
+    });
+    expect((reddit.structuredContent as Record<string, unknown>).bodyMarkdown).toBe("New Markdown body");
+    expect((reddit.structuredContent as Record<string, unknown>).subredditSuggestions).toEqual(["research"]);
+    expect(reddit.fullMarkdown).toContain("New Markdown body");
+  });
+
   it("falls back to simple markdown when no structured content exists", () => {
     const payload = buildManualRevisionPayload({
       contentKind: "xhs_graphic",

@@ -322,58 +322,59 @@ enum DirectionReviewStatus {
 }
 
 model User {
-  id                   String                       @id @default(cuid())
-  email                String?                      @unique
-  emailVerified        DateTime?
-  name                 String?
-  image                String?
-  avatarUrl            String?
-  defaultLlmProvider   LlmProviderName?
-  disabledSkillIds     String[]                     @default([])
-  createdAt            DateTime                     @default(now())
-  updatedAt            DateTime                     @updatedAt
-  authAccounts         Account[]
-  sessions             Session[]
-  acceptedInvitation   Invitation?                  @relation("AcceptedInvitation")
-  personas             Persona[]
-  accounts             BenchmarkAccount[]
-  conversations        Conversation[]
-  contents             GeneratedContent[]
-  fetchLogs            FetchLog[]
-  aiLogs               AiCallLog[]
-  analyses             BenchmarkAnalysis[]
-  credentials          ProviderCredential[]
-  jobs                 ProcessingJob[]
-  trendTopics          TrendTopic[]
-  trendObservations    TrendObservation[]
-  ideas                Idea[]
-  styleProfiles        CreatorStyleProfile[]
-  styleEvidence        StyleEvidence[]
-  contentRevisions     ContentRevision[]
-  scoringRubrics       ScoringRubric[]
-  publishRecords       PublishRecord[]
-  metricSnapshots      MetricSnapshot[]
-  retrospectives       Retrospective[]
-  agentRuns            AgentRun[]
-  contentReferences    ContentReference[]
-  customSkills         UserSkill[]
-  hotspotAiInsights    HotspotAiInsight[]
-  socialConnections    SocialConnection[]
-  trackedPublications  TrackedPublication[]
-  trackedMetrics       TrackedMetricSnapshot[]
-  trackingAnalyses     TrackingAnalysis[]
-  conversationEvents   ConversationEvent[]
-  pendingInteractions  PendingInteraction[]
-  queuedTurns          QueuedTurn[]
-  conversationSegments ConversationSegment[]
-  accountMemories      AccountMemory[]
-  memoryAudits         MemoryAudit[]
-  scheduledWorkflows   ScheduledWorkflow[]
-  workflowRuns         WorkflowRun[]
-  contextVersions      ConversationContextVersion[]
-  directionDecisions   CreativeDirectionDecision[]
-  directionCandidates  CreativeDirectionCandidate[]
-  directionReviews     ContentDirectionReview[]
+  id                     String                       @id @default(cuid())
+  email                  String?                      @unique
+  emailVerified          DateTime?
+  name                   String?
+  image                  String?
+  avatarUrl              String?
+  defaultLlmProvider     LlmProviderName?
+  disabledSkillIds       String[]                     @default([])
+  createdAt              DateTime                     @default(now())
+  updatedAt              DateTime                     @updatedAt
+  authAccounts           Account[]
+  sessions               Session[]
+  acceptedInvitation     Invitation?                  @relation("AcceptedInvitation")
+  personas               Persona[]
+  accounts               BenchmarkAccount[]
+  conversations          Conversation[]
+  contents               GeneratedContent[]
+  fetchLogs              FetchLog[]
+  aiLogs                 AiCallLog[]
+  analyses               BenchmarkAnalysis[]
+  credentials            ProviderCredential[]
+  jobs                   ProcessingJob[]
+  trendTopics            TrendTopic[]
+  trendObservations      TrendObservation[]
+  ideas                  Idea[]
+  styleProfiles          CreatorStyleProfile[]
+  styleEvidence          StyleEvidence[]
+  contentRevisions       ContentRevision[]
+  scoringRubrics         ScoringRubric[]
+  publishRecords         PublishRecord[]
+  metricSnapshots        MetricSnapshot[]
+  retrospectives         Retrospective[]
+  agentRuns              AgentRun[]
+  contentReferences      ContentReference[]
+  customSkills           UserSkill[]
+  hotspotAiInsights      HotspotAiInsight[]
+  socialConnections      SocialConnection[]
+  trackedPublications    TrackedPublication[]
+  trackedMetrics         TrackedMetricSnapshot[]
+  trackingAnalyses       TrackingAnalysis[]
+  conversationEvents     ConversationEvent[]
+  pendingInteractions    PendingInteraction[]
+  queuedTurns            QueuedTurn[]
+  conversationSegments   ConversationSegment[]
+  accountMemories        AccountMemory[]
+  memoryAudits           MemoryAudit[]
+  scheduledWorkflows     ScheduledWorkflow[]
+  workflowRuns           WorkflowRun[]
+  contextVersions        ConversationContextVersion[]
+  directionDecisions     CreativeDirectionDecision[]
+  directionCandidates    CreativeDirectionCandidate[]
+  directionReviews       ContentDirectionReview[]
+  contentPublishSettings ContentPublishSetting[]
 }
 
 model Account {
@@ -869,11 +870,26 @@ model GeneratedContent {
   contentReferences        ContentReference[]
   trackedPublications      TrackedPublication[]
   directionReviews         ContentDirectionReview[]
+  publishSettings          ContentPublishSetting?
 
   @@index([userId, platform, updatedAt])
   @@index([conversationId])
   @@index([ideaId])
   @@index([targetSocialConnectionId])
+}
+
+model ContentPublishSetting {
+  id        String           @id @default(cuid())
+  userId    String
+  contentId String           @unique
+  platform  Platform
+  settings  Json
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   GeneratedContent @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  @@index([userId, platform, updatedAt])
 }
 
 model ContentRevision {

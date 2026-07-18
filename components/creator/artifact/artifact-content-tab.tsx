@@ -9,6 +9,7 @@ import {
 import type { ArtifactContentData, ArtifactDraft } from "@/hooks/creator/use-artifact";
 import { XhsGraphicEditor } from "@/components/creator/artifact/xhs-graphic-editor";
 import { DouyinStoryboardEditor } from "@/components/creator/artifact/douyin-storyboard-editor";
+import { GlobalPlatformEditor } from "@/components/editor/global-platform-editor";
 
 /**
  * 「内容」标签:按平台分发到结构化编辑器。
@@ -26,6 +27,20 @@ export function ArtifactContentTab(props: {
     options?: { detail?: string; excerpt?: string },
   ) => void;
 }) {
+  if (
+    props.draft.structured &&
+    !["xhs_graphic", "douyin_video_script"].includes(props.content.contentKind)
+  ) {
+    return (
+      <GlobalPlatformEditor
+        contentKind={props.content.contentKind}
+        draft={props.draft}
+        readOnly={props.readOnly}
+        onEdit={props.onEdit}
+      />
+    );
+  }
+
   if (
     !props.draft.structured ||
     !["xhs_graphic", "douyin_video_script"].includes(props.content.contentKind)

@@ -210,7 +210,7 @@ export function ConversationThread(props: {
                       message.status === "failed" && "text-[#8A2B24]",
                     )}
                   >
-                    {message.content}
+                    {clarifyLegacyTaskStatus(message.content)}
                   </p>
                 )}
                 {message.status === "failed" ? (
@@ -300,7 +300,9 @@ export function ConversationThread(props: {
             ) : (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                上一次请求仍在处理中…
+                <span>
+                  本轮内容仍在生成。上方“已建立任务”表示任务已进入队列，不代表作品已经完成。
+                </span>
               </>
             )}
             <Button
@@ -337,6 +339,19 @@ function RunTraceRow({ trace }: { trace: RunTrace }) {
       </div>
     </details>
   );
+}
+
+/** 旧会话保留历史消息原文；显示时补齐“任务建档”和“内容完成”的状态层级。 */
+function clarifyLegacyTaskStatus(content: string): string {
+  return content
+    .replace(
+      /已创建 (\d+) 个相互独立的平台创作任务。/g,
+      "已建立 $1 个相互独立的平台任务，正在生成内容。",
+    )
+    .replace(
+      /已创建 (\d+) 个独立创作任务。每个平台可以分别查看、重试和编辑。/g,
+      "已建立 $1 个独立的平台任务并进入生成队列。作品完成后可分别查看、重试和编辑。",
+    );
 }
 
 function hasLedgerEntries(value: unknown) {

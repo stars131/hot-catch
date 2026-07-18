@@ -4,7 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Eye, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useArtifact, sourceLabel } from "@/hooks/creator/use-artifact";
+import {
+  useArtifact,
+  sourceLabel,
+  type ArtifactContentData,
+  type ArtifactDraft,
+} from "@/hooks/creator/use-artifact";
 import {
   artifactBlockAnchor,
   artifactSectionLabel,
@@ -62,8 +67,16 @@ export function ArtifactPanel(props: {
   onPublishPrepare?: (params: { contentId: string; title: string }) => Promise<boolean>;
   /** 就绪卡「打开检查清单」的打开请求;数值变化时打开一次 */
   openChecklistNonce?: number;
+  /** 嵌入独立编辑中心时隐藏关闭入口，并向右侧实时预览同步当前草稿。 */
+  embedded?: boolean;
+  onDraftChange?: (snapshot: {
+    content: ArtifactContentData;
+    draft: ArtifactDraft;
+    previewing: boolean;
+  }) => void;
 }) {
   const artifact = useArtifact(props.contentId);
+  const onDraftChange = props.onDraftChange;
   const [tab, setTab] = useState<ArtifactEditorTab>("content");
   const [insertNotice, setInsertNotice] = useState<string | null>(null);
   const [checklistOpen, setChecklistOpen] = useState(false);
@@ -77,6 +90,15 @@ export function ArtifactPanel(props: {
       (artifact.content.platform === "xiaohongshu" || artifact.content.platform === "douyin") &&
       isDomesticContentKind(artifact.content.contentKind),
   );
+
+  useEffect(() => {
+    if (!artifact.content) return;
+    onDraftChange?.({
+      content: artifact.content,
+      draft: artifact.draft,
+      previewing: artifact.previewing,
+    });
+  }, [artifact.content, artifact.draft, artifact.previewing, onDraftChange]);
 
   // 打开时移入焦点,关闭时还原;切换内容时重置清单状态
   useEffect(() => {
@@ -101,7 +123,7 @@ export function ArtifactPanel(props: {
         setChecklistOpen(false);
         return;
       }
-      props.onClose();
+      if (!props.embedded) props.onClose();
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
@@ -285,6 +307,7 @@ export function ArtifactPanel(props: {
             onPreparePublish={() => setChecklistOpen(true)}
             canPreparePublish={supportsPublishing}
             onClose={props.onClose}
+            showClose={!props.embedded}
           />
 
           {checklistOpen && supportsPublishing ? (

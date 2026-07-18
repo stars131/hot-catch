@@ -42,6 +42,7 @@ export function ArtifactToolbar(props: {
   onPreparePublish: () => void;
   canPreparePublish: boolean;
   onClose: () => void;
+  showClose?: boolean;
 }) {
   const tp = useTranslations("Platforms");
   const saveLabel = props.dirty
@@ -70,16 +71,18 @@ export function ArtifactToolbar(props: {
         <span className="shrink-0 rounded-lg border border-[#DDD7CE] bg-[#FAF9F6] px-1.5 py-0.5 text-[11px] text-[#746F67]">
           {tp(props.content.platform)}
         </span>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-8 w-8 shrink-0 rounded-lg"
-          aria-label="关闭编辑面板"
-          data-testid="artifact-panel-close"
-          onClick={props.onClose}
-        >
-          <X className="h-4 w-4" />
-        </Button>
+        {props.showClose !== false ? (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8 shrink-0 rounded-lg"
+            aria-label="关闭编辑面板"
+            data-testid="artifact-panel-close"
+            onClick={props.onClose}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        ) : null}
       </div>
 
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">

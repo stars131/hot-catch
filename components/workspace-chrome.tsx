@@ -14,6 +14,7 @@ import {
   Lightbulb,
   Loader2,
   Menu,
+  PanelsTopLeft,
   Puzzle,
   Rocket,
   Settings,
@@ -30,6 +31,7 @@ const navigation = [
   { href: "/creator", labelKey: "creator", shortLabelKey: "shortCreator", icon: FilePenLine },
   { href: "/hotspots", labelKey: "hotspots", shortLabelKey: "shortHotspots", icon: Flame },
   { href: "/ideas", labelKey: "ideas", shortLabelKey: "shortIdeas", icon: Lightbulb },
+  { href: "/editor", labelKey: "editor", shortLabelKey: "shortEditor", icon: PanelsTopLeft },
   { href: "/publish", labelKey: "publish", shortLabelKey: "shortPublish", icon: Rocket },
   { href: "/retrospectives", labelKey: "retrospectives", shortLabelKey: "shortRetrospectives", icon: BarChart3 },
   { href: "/personas", labelKey: "personas", shortLabelKey: "personas", icon: UserRound },
@@ -39,7 +41,7 @@ const navigation = [
 ] as const;
 
 const mobileNavigation = navigation.filter((item) =>
-  ["/creator", "/hotspots", "/ideas", "/publish", "/retrospectives"].includes(
+  ["/creator", "/hotspots", "/ideas", "/editor", "/publish"].includes(
     item.href,
   ),
 );
@@ -48,6 +50,7 @@ const workspacePrefixes = [
   "/creator",
   "/hotspots",
   "/ideas",
+  "/editor",
   "/publish",
   "/retrospectives",
   "/personas",

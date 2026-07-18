@@ -725,8 +725,8 @@ export const ACTION_REGISTRY: Record<string, ActionHandler> = {
       return {
         text:
           context.card.uiLocale === "zh-CN"
-            ? `已创建 ${createdCount} 个独立创作任务。每个平台可以分别查看、重试和编辑。`
-            : `Created ${createdCount} independent tasks. Each platform can be viewed, retried and edited separately.`,
+            ? `已建立 ${createdCount} 个独立的平台任务并进入生成队列。作品完成后可分别查看、重试和编辑。`
+            : `Created ${createdCount} independent platform tasks and queued them for generation. Each finished work can be viewed, retried, and edited separately.`,
         command: "content.generate_bundle",
       };
     },
