@@ -92,7 +92,7 @@ test.beforeAll(async () => {
         bodyText: content.bodyText,
         fullMarkdown: content.fullMarkdown,
         structuredContent: { platform, locale: "ja-JP", body: "安全な本文です。" },
-        checksum: `c14-e2e-${suffix}-${platform}`,
+        checksum: `${index}`.padStart(64, "a"),
       },
     });
     revisionByPlatform.set(platform, revision.id);
@@ -241,6 +241,8 @@ test("conversational five-platform setup preserves Japanese, Skills, editing and
   for (const platform of ["TikTok", "Instagram", "X", "Reddit"]) {
     await setupCard.getByRole("button", { name: new RegExp(platform) }).click();
   }
+  await setupCard.getByRole("button", { name: "选择账号", exact: true }).click();
+  await setupCard.getByRole("button", { name: "选择语言", exact: true }).click();
   await setupCard.getByRole("button", { name: "日语", exact: true }).click();
   await setupCard.getByRole("button", { name: /强化开头钩子/ }).click();
   await setupCard.getByRole("button", { name: /风险与合规检查/ }).click();
@@ -248,14 +250,19 @@ test("conversational five-platform setup preserves Japanese, Skills, editing and
   await page.getByRole("button", { name: "语言: English" }).click();
   await expect(page.locator("html")).toHaveAttribute("lang", "en-US");
   await expect(page).toHaveURL(new RegExp(`/creator\\?conversationId=${conversationId}`));
+  await setupCard.getByRole("button", { name: /选择目标平台/ }).click();
   for (const platform of platforms) {
     const name = platform === "youtube" ? "YouTube" : platform === "tiktok" ? "TikTok" : platform === "instagram" ? "Instagram" : platform === "x" ? "X" : "Reddit";
     await expect(setupCard.getByRole("button", { name: new RegExp(name) })).toHaveAttribute("aria-pressed", "true");
   }
+  await setupCard.getByRole("button", { name: "选择账号", exact: true }).click();
+  await setupCard.getByRole("button", { name: "选择语言", exact: true }).click();
   await expect(setupCard.getByRole("button", { name: "日语", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await setupCard.getByRole("button", { name: "日语", exact: true }).click();
   await expect(setupCard.getByRole("button", { name: /强化开头钩子/ })).toHaveAttribute("aria-pressed", "true");
   await expect(setupCard.getByRole("button", { name: /风险与合规检查/ })).toHaveAttribute("aria-pressed", "true");
 
+  await setupCard.getByRole("button", { name: "检查设置", exact: true }).click();
   await setupCard.getByRole("button", { name: "确认并开始生成" }).click();
   for (const platform of platforms) {
     await expect(page.getByTestId(`card-artifact-artifact-${platform}-${suffix}`)).toBeVisible();

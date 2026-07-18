@@ -77,7 +77,7 @@ export function CreatorShell(props: {
           <LanguageSwitcher />
         </header>
 
-        <main className="min-h-0 flex-1 overflow-y-auto">{props.children}</main>
+        <main id="conversation-scroll-root" className="min-h-0 flex-1 overflow-y-auto">{props.children}</main>
 
         <div className="shrink-0 border-t border-[#DDD7CE] bg-[#F4F1EA] px-3 pb-[max(calc(env(safe-area-inset-bottom)+64px),76px)] pt-3 lg:pb-[max(env(safe-area-inset-bottom),12px)]">
           {props.composer}

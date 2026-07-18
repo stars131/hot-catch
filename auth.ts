@@ -82,8 +82,8 @@ export const authConfig = {
       const invitation = await prisma.invitation.findUnique({ where: { email } });
       return Boolean(
         invitation &&
-          invitation.status !== "revoked" &&
-          invitation.expiresAt > new Date(),
+          (invitation.status === "accepted" ||
+            (invitation.status === "pending" && invitation.expiresAt > new Date())),
       );
     },
     async jwt({ token, user }) {

@@ -46,7 +46,7 @@ export function ArtifactCardView(props: {
         aria-label={t("openAria", { title: props.card.title })}
         data-testid="artifact-card-open-area"
       >
-        <FileText className="mt-0.5 h-4 w-4 shrink-0 text-[#C83B32]" />
+        <FileText className="mt-0.5 h-4 w-4 shrink-0 text-[#476451]" />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             <span className="min-w-0 flex-1 truncate text-sm font-medium">
@@ -76,7 +76,7 @@ export function ArtifactCardView(props: {
             className={cn(
               "rounded-lg",
               action.appearance === "primary"
-                ? "bg-[#C83B32] text-[#FFFDF9] hover:bg-[#B3352D]"
+                ? "bg-[#355642] text-white hover:bg-[#294836]"
                 : "border-[#DDD7CE]",
             )}
             disabled={props.state.phase === "loading"}

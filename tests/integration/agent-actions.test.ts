@@ -75,7 +75,7 @@ describe("普通消息与 pending → succeeded/failed", () => {
     expect(result.run!.assistantMessageId).toBe(result.assistantMessage!.id);
   });
 
-  it("首次回复携带 option 方向卡", async () => {
+  it("首次回复携带模型方向推荐卡", async () => {
     const list = await listConversationMessages({ userId: userAId, conversationId: convAId });
     const withCard = list.messages.find(
       (message) =>
@@ -132,60 +132,66 @@ describe("clientMessageId 幂等与刷新重放", () => {
   });
 });
 
-describe("option 卡动作", () => {
-  it("提交选项创建结果消息;篡改的 optionId 不会通过标签解析", async () => {
+describe("方向推荐卡动作", () => {
+  it("确认推荐方向创建结果消息", async () => {
     const reply = await buildDefaultReply({
       userId: userAId,
-      conversationId: `fresh-${runId}`,
+      conversationId: convAId,
       text: "写点什么",
     });
-    const optionCard = reply.cards[0];
-    expect(optionCard.type).toBe("option");
-    const source = await createCardMessage(convAId, [optionCard]);
+    const directionCard = reply.cards[0];
+    expect(directionCard.type).toBe("direction_recommendation");
+    if (directionCard.type !== "direction_recommendation") throw new Error("expected direction card");
+    const source = await createCardMessage(convAId, [directionCard]);
+    const primary = directionCard.recommendations[0].ref;
 
     const result = await invokeCardAction({
       userId: userAId,
       conversationId: convAId,
       clientActionId: `ca-opt-${runId}`,
       sourceMessageId: source.id,
-      cardId: optionCard.id,
-      actionId: "direction.choose",
-      values: { optionIds: ["direction-experience"] },
+      cardId: directionCard.id,
+      actionId: "direction.confirm",
+      values: { text: JSON.stringify({ primary }) },
     });
     expect(result.replayed).toBe(false);
-    expect(result.resultMessage.content).toContain("经验分享");
+    expect(result.resultMessage.content.length).toBeGreaterThan(0);
   });
 
   it("已处理动作再次点击(新的 clientActionId)返回第一次结果", async () => {
     const reply = await buildDefaultReply({
       userId: userAId,
-      conversationId: `fresh2-${runId}`,
+      conversationId: convAId,
       text: "写点什么",
     });
-    const optionCard = { ...reply.cards[0], id: `card-direction-2-${runId.slice(-6)}` } as ChatCard;
-    const source = await createCardMessage(convAId, [optionCard]);
+    const directionCard = reply.cards[0];
+    expect(directionCard.type).toBe("direction_recommendation");
+    if (directionCard.type !== "direction_recommendation") throw new Error("expected direction card");
+    const card = { ...directionCard, id: `card-direction-2-${runId.slice(-6)}` };
+    const source = await createCardMessage(convAId, [card]);
+    const primary = card.recommendations[0].ref;
 
     const first = await invokeCardAction({
       userId: userAId,
       conversationId: convAId,
       clientActionId: `ca-first-${runId}`,
       sourceMessageId: source.id,
-      cardId: optionCard.id,
-      actionId: "direction.choose",
-      values: { optionIds: ["direction-checklist"] },
+      cardId: card.id,
+      actionId: "direction.confirm",
+      values: { text: JSON.stringify({ primary }) },
     });
     const second = await invokeCardAction({
       userId: userAId,
       conversationId: convAId,
       clientActionId: `ca-second-${runId}`,
       sourceMessageId: source.id,
-      cardId: optionCard.id,
-      actionId: "direction.choose",
-      values: { optionIds: ["direction-experience"] },
+      cardId: card.id,
+      actionId: "direction.confirm",
+      values: { text: JSON.stringify({ primary }) },
     });
     expect(second.replayed).toBe(true);
     expect(second.resultMessage.id).toBe(first.resultMessage.id);
-    expect(second.resultMessage.content).toContain("步骤清单");
+    expect(second.resultMessage.content).toBe(first.resultMessage.content);
   });
 
   it("重复 clientActionId 返回第一次执行结果", async () => {

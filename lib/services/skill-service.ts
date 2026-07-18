@@ -12,6 +12,10 @@ import {
   type SkillSnapshot,
 } from "@/lib/skills/catalog";
 import type { CreateSkillInput, UpdateSkillInput } from "@/lib/validators/skills";
+import {
+  isApprovedExtensionSkillId,
+  listApprovedExtensionSkills,
+} from "@/lib/skills/extension-registry";
 
 const MAX_CUSTOM_SKILLS = 50;
 
@@ -29,6 +33,7 @@ export async function listSkillsForUser(userId: string): Promise<SkillCatalogIte
   if (!user) throw new AppError("NOT_FOUND", "用户不存在。", 404);
 
   const builtin = listBuiltinSkillCatalog(user.disabledSkillIds);
+  const extensions = listApprovedExtensionSkills(user.disabledSkillIds);
   const custom: SkillCatalogItem[] = customSkills.map((skill) => ({
     id: customSkillExternalId(skill.id),
     name: skill.name,
@@ -40,7 +45,7 @@ export async function listSkillsForUser(userId: string): Promise<SkillCatalogIte
     composerTemplate: null,
     updatedAt: skill.updatedAt.toISOString(),
   }));
-  return [...builtin, ...custom];
+  return [...builtin, ...extensions, ...custom];
 }
 
 export async function createCustomSkill(userId: string, input: CreateSkillInput) {
@@ -53,11 +58,14 @@ export async function createCustomSkill(userId: string, input: CreateSkillInput)
 }
 
 export async function updateUserSkill(userId: string, input: UpdateSkillInput) {
-  if (isBuiltinSkillId(input.id)) {
+  if (isBuiltinSkillId(input.id) || isApprovedExtensionSkillId(input.id)) {
     if (input.enabled === undefined || input.name || input.description || input.instructions) {
       throw new AppError("VALIDATION_ERROR", "内置 Skill 只允许启用或停用。", 400);
     }
-    const builtin = listBuiltinSkillCatalog().find((skill) => skill.id === input.id);
+    const builtin = [
+      ...listBuiltinSkillCatalog(),
+      ...listApprovedExtensionSkills(),
+    ].find((skill) => skill.id === input.id);
     if (!builtin) throw new AppError("NOT_FOUND", "内置 Skill 不存在。", 404);
     const user = await prisma.user.findUnique({
       where: { id: userId },

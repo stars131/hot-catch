@@ -14,6 +14,11 @@ import { resolveSelectedSkills, skillSnapshotsJson } from "@/lib/services/skill-
 import type { GenerationBatchInput } from "@/lib/validators/generation-batch";
 import { CHAT_PROTOCOL } from "@/lib/creator/chat-protocol";
 import { chatMessageMetadataV1Schema } from "@/lib/creator/chat-schemas";
+import {
+  contextSnapshotForPlatform,
+  createConversationContextVersion,
+} from "@/lib/services/conversation-context-service";
+import { resolveDirectionSelectionSnapshot } from "@/lib/services/creative-direction-service";
 
 const BATCH_MESSAGE_PREFIX = "generation-batch:";
 
@@ -53,6 +58,25 @@ export async function createGenerationBatch(params: {
       snapshot: true,
     },
   });
+  const accountBindings = params.input.accountBindings ?? {};
+  const directionSnapshot = params.input.directionSelection
+    ? await resolveDirectionSelectionSnapshot({
+        userId: params.userId,
+        conversationId: params.conversationId,
+        selection: params.input.directionSelection,
+      })
+    : undefined;
+  const contextVersion = await createConversationContextVersion({
+    userId: params.userId,
+    conversationId: params.conversationId,
+    accountBindings,
+    targetPlatforms: params.input.targetPlatforms,
+    contentLocale: params.input.targetLocale,
+    skills,
+    references: sharedReferences.map((reference) => reference.snapshot),
+    creativeDirectionSnapshot: directionSnapshot,
+    promptVersion: "generation-batch/v2",
+  });
   const requestKey = params.idempotencyKey ?? randomUUID();
   const clientMessageId = `${BATCH_MESSAGE_PREFIX}${requestKey}`;
   const replayed = await loadGenerationBatch(params.userId, params.conversationId, clientMessageId);
@@ -91,10 +115,12 @@ export async function createGenerationBatch(params: {
           assistantMessageId: assistantMessage.id,
           status: "running",
           command: "content.generate_bundle",
+          contextVersionId: contextVersion.id,
           input: {
             brief: params.input.brief,
             targetPlatforms: params.input.targetPlatforms,
             targetLocale: params.input.targetLocale,
+            directionSelection: params.input.directionSelection,
             skillIds: skills.map((skill) => skill.id),
             expectedCount: params.input.targetPlatforms.length,
             uiLocale: params.uiLocale,
@@ -105,6 +131,8 @@ export async function createGenerationBatch(params: {
       const contents: Array<{ contentId: string; platform: PlatformId }> = [];
       for (const platform of params.input.targetPlatforms) {
         const definition = PLATFORM_DEFINITIONS[platform];
+        const contextSnapshot = contextSnapshotForPlatform(contextVersion, platform);
+        const personaSnapshot = contextSnapshot.persona as { id?: string } | null;
         const content = await tx.generatedContent.create({
           data: {
             userId: params.userId,
@@ -115,6 +143,9 @@ export async function createGenerationBatch(params: {
             title: params.input.brief.slice(0, 120),
             inputType: "draft",
             inputText: params.input.brief,
+            personaId: personaSnapshot?.id,
+            targetSocialConnectionId: accountBindings[platform],
+            contextSnapshot: contextSnapshot as Prisma.InputJsonValue,
             outputType: definition.contentKind,
             selectedSkillIds: skills.map((skill) => skill.id),
             skillSnapshots: skills.length

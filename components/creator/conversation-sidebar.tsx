@@ -1,27 +1,9 @@
 "use client";
 
-import Link from "next/link";
-import {
-  Flame,
-  Lightbulb,
-  LineChart,
-  Pencil,
-  Plug,
-  Plus,
-  Puzzle,
-  Send,
-} from "lucide-react";
+import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { ConversationSummary } from "@/lib/creator/conversation-client";
-
-const PRIMARY_NAV = [
-  { href: "/creator/xiaohongshu", label: "创作", icon: Pencil, current: true },
-  { href: "/hotspots", label: "热点", icon: Flame },
-  { href: "/ideas", label: "选题", icon: Lightbulb },
-  { href: "/publish", label: "发布", icon: Send },
-  { href: "/retrospectives", label: "复盘", icon: LineChart },
-] as const;
 
 function groupLabel(updatedAt: string, now: Date): "今天" | "近 7 天" | "更早" {
   const updated = new Date(updatedAt);
@@ -59,28 +41,6 @@ export function ConversationSidebar(props: {
           <Plus className="h-4 w-4" /> 新建创作
         </Button>
       </div>
-
-      <nav aria-label="主导航" className="shrink-0 px-3 pb-2">
-        <ul className="space-y-0.5">
-          {PRIMARY_NAV.map((item) => (
-            <li key={item.href}>
-              <Link
-                href={item.href}
-                aria-current={"current" in item && item.current ? "page" : undefined}
-                className={cn(
-                  "flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm",
-                  "current" in item && item.current
-                    ? "bg-[#EDE9E0] font-medium text-[#1F1D19]"
-                    : "text-[#746F67] hover:bg-[#EDE9E0] hover:text-[#1F1D19]",
-                )}
-              >
-                <item.icon className="h-4 w-4 shrink-0" />
-                {item.label}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </nav>
 
       <div className="mx-3 shrink-0 border-t border-[#DDD7CE]" />
 
@@ -127,26 +87,6 @@ export function ConversationSidebar(props: {
         )}
       </div>
 
-      <div className="shrink-0 border-t border-[#DDD7CE] p-3">
-        <ul className="space-y-0.5">
-          <li>
-            <Link
-              href="/settings/connections"
-              className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-[#746F67] hover:bg-[#EDE9E0] hover:text-[#1F1D19]"
-            >
-              <Plug className="h-4 w-4" /> 连接
-            </Link>
-          </li>
-          <li>
-            <Link
-              href="/settings/skills"
-              className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-[#746F67] hover:bg-[#EDE9E0] hover:text-[#1F1D19]"
-            >
-              <Puzzle className="h-4 w-4" /> Skill
-            </Link>
-          </li>
-        </ul>
-      </div>
     </div>
   );
 }

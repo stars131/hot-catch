@@ -24,7 +24,7 @@ export type HotspotPlatformCode =
   | "v2ex"
   | "hellogithub"
   | "xiaohongshu"
-  | "so360"
+  | "ifeng"
   | "sogou"
   | "sina"
   | "douban-movie";
@@ -51,7 +51,7 @@ export type HotspotPlatformLabel =
   | "V2EX"
   | "HelloGitHub"
   | "小红书"
-  | "360搜索"
+  | "凤凰网"
   | "搜狗"
   | "新浪"
   | "豆瓣电影";
@@ -71,7 +71,10 @@ export type HotspotSourceDefinition = {
   label: HotspotPlatformLabel;
   category: string;
   apiPath: string;
+  credentialFree: boolean;
+  publicBackends: string[];
   requiresCookie: boolean;
+  supportsOptionalConnection: boolean;
   cookieConfigured: boolean;
   environmentCookieConfigured?: boolean;
   environmentUpstreamConfigured?: boolean;
@@ -124,6 +127,7 @@ export type HotspotSourceHealth = {
   count: number;
   backend: string;
   requiresCookie?: boolean;
+  supportsOptionalConnection?: boolean;
   cookieConfigured?: boolean;
   message?: string;
 };
@@ -147,6 +151,8 @@ export type HotspotPayload = {
     activeSources: number;
     crossPlatformTopics: number;
     backendCount: number;
+    credentialFreeSourceCount: number;
+    optionalConnectionSourceCount: number;
     cookieSourceCount: number;
     cookieConfiguredCount: number;
     projectReferenceCount: number;
@@ -163,6 +169,8 @@ type HotspotSource = {
   orzPlatform?: string;
   dailyHotRoute?: string;
   sixtyRoute?: string;
+  newsNowId?: string;
+  tuochengPath?: string;
   cookieBackend?: boolean;
   nativeFetcher?: (source: HotspotSource) => Promise<HotspotSourceItem[]>;
 };
@@ -232,6 +240,8 @@ const ORZ_DAILY_NEWS_ENDPOINTS = [
 ];
 const DAILY_HOT_API_BASE = "https://api-hot.imsyy.top";
 const SIXTY_SECONDS_BASE = "https://60s.viki.moe/v2";
+const NEWS_NOW_BASE = "https://newsnow.busiyi.world/api/s";
+const TUOCHENG_API_BASE = "https://api.tcslw.cn";
 
 const COOKIE_BACKENDS: CookieBackendConfig[] = [
   {
@@ -239,62 +249,91 @@ const COOKIE_BACKENDS: CookieBackendConfig[] = [
     cookieEnv: "HOTSPOT_XIAOHONGSHU_COOKIE",
     upstreamEnv: "HOTSPOT_XIAOHONGSHU_UPSTREAM",
     defaultUrl: "https://edith.xiaohongshu.com/api/sns/web/v1/search/hot_list",
-    notes: "小红书 Web 热搜接口通常需要登录态 Cookie，也可能需要风控签名；可用自建上游聚合接口替代。",
+    notes: "默认通过 60s 的公开 rednote 端点获取；站点 Cookie 或自建上游只作为可选增强。",
   },
   {
     code: "kuaishou",
     cookieEnv: "HOTSPOT_KUAISHOU_COOKIE",
     upstreamEnv: "HOTSPOT_KUAISHOU_UPSTREAM",
-    notes: "快手热榜常走 GraphQL/Web 会话，默认保留 Cookie 与自建上游入口。",
+    notes: "默认尝试公开页面、NewsNow、DailyHotApi 与无 Key 公共接口；Cookie 或自建上游只作为可选增强。",
   },
   {
     code: "hupu",
     cookieEnv: "HOTSPOT_HUPU_COOKIE",
     upstreamEnv: "HOTSPOT_HUPU_UPSTREAM",
-    notes: "虎扑社区页在部分网络下会触发风控；可配置 Cookie 或自建解析上游。",
+    notes: "默认读取虎扑公开移动 API，并使用 NewsNow、orz.ai 等后备；Cookie 或自建上游只作为可选增强。",
   },
   {
     code: "36kr",
     cookieEnv: "HOTSPOT_36KR_COOKIE",
     upstreamEnv: "HOTSPOT_36KR_UPSTREAM",
     defaultUrl: "https://gateway.36kr.com/api/mis/nav/home/nav/rank/hot",
-    notes: "36氪网关可能按地域或频率返回异常；保留 Cookie 与聚合上游方案。",
+    notes: "默认以无凭证 POST 请求读取 36氪公开网关，并使用公开聚合后备；Cookie 或自建上游只作为可选增强。",
   },
   {
     code: "qq-news",
     cookieEnv: "HOTSPOT_QQ_NEWS_COOKIE",
     upstreamEnv: "HOTSPOT_QQ_NEWS_UPSTREAM",
     defaultUrl: "https://i.news.qq.com/trpc.qqnews_web.kv_srv.kv_srv_http_proxy/list?sub_srv_id=24hours&srv_id=pc&offset=0&limit=30&strategy=1",
-    notes: "腾讯新闻热榜接口有时需要会话与频控；可经本地聚合 API 使用。",
+    notes: "默认读取腾讯新闻公开热榜 API，并使用 NewsNow、orz.ai 等后备；Cookie 或自建上游只作为可选增强。",
   },
   {
     code: "sspai",
     cookieEnv: "HOTSPOT_SSPAI_COOKIE",
     upstreamEnv: "HOTSPOT_SSPAI_UPSTREAM",
     defaultUrl: "https://sspai.com/api/v1/article/tag/page/get?limit=30&offset=0",
-    notes: "少数派接口偶发需要客户端态；Cookie 配置后作为后备聚合源。",
-  },
-  {
-    code: "so360",
-    cookieEnv: "HOTSPOT_SO360_COOKIE",
-    upstreamEnv: "HOTSPOT_SO360_UPSTREAM",
-    notes: "360 搜索趋势在部分 TLS/风控场景下不稳定，保留自建上游入口。",
+    notes: "默认读取少数派公开文章接口，并使用 NewsNow、orz.ai 等后备；Cookie 或自建上游只作为可选增强。",
   },
   {
     code: "sogou",
     cookieEnv: "HOTSPOT_SOGOU_COOKIE",
     upstreamEnv: "HOTSPOT_SOGOU_UPSTREAM",
-    notes: "搜狗热榜保留 Cookie 和自建上游入口。",
+    notes: "默认通过公开聚合接口读取搜狗热榜；Cookie 或自建上游只作为可选增强。",
   },
   {
     code: "sina",
     cookieEnv: "HOTSPOT_SINA_COOKIE",
     upstreamEnv: "HOTSPOT_SINA_UPSTREAM",
-    notes: "新浪热门页常见编码和访问限制问题，建议通过自建上游归一化。",
+    notes: "默认直接读取新浪公开热榜 API；Cookie 或自建上游只作为可选增强。",
   },
 ];
 
 export const HOTSPOT_PROJECT_REFERENCES: HotspotProjectReference[] = [
+  {
+    repo: "FxEmbed/FxEmbed",
+    url: "https://github.com/FxEmbed/FxEmbed",
+    role: "api-backend",
+    notes: "MIT 开源的 FxTwitter 公开 API，覆盖搜索、趋势、用户资料与时间线。",
+    influence: "作为无需用户凭证的 X 公开信息主数据源，并保留来源和覆盖范围提示。",
+  },
+  {
+    repo: "ythx-101/x-tweet-fetcher",
+    url: "https://github.com/ythx-101/x-tweet-fetcher",
+    role: "algorithm",
+    notes: "面向 OSINT/Agent 的无 API Key X 抓取路由，采用统一响应与后端自动降级。",
+    influence: "参考公开后端适配、机器可读错误和自动降级模式；未复制其 Python 实现。",
+  },
+  {
+    repo: "xdevplatform/samples",
+    url: "https://github.com/xdevplatform/samples",
+    role: "api-backend",
+    notes: "X 官方 API v2 的检索、用户查找与时间线示例。",
+    influence: "采用 Bearer Token、字段显式声明、批量用户查找和官方端点响应模型。",
+  },
+  {
+    repo: "xdevplatform/xmcp",
+    url: "https://github.com/xdevplatform/xmcp",
+    role: "source-map",
+    notes: "X 官方 MCP 服务对趋势、近期检索和用户时间线能力的工具化映射。",
+    influence: "把地区、话题、博主三类能力拆成显式且可审计的检索模式。",
+  },
+  {
+    repo: "vladkens/twscrape",
+    url: "https://github.com/vladkens/twscrape",
+    role: "algorithm",
+    notes: "社区 OSINT/X 采集项目，展示并发、部分失败和限速状态管理。",
+    influence: "仅参考并发与限速工程模式；不接入账号池、Cookie 轮换或风控规避。",
+  },
   {
     repo: "imsyy/DailyHotApi",
     url: "https://github.com/imsyy/DailyHotApi",
@@ -303,11 +342,25 @@ export const HOTSPOT_PROJECT_REFERENCES: HotspotProjectReference[] = [
     influence: "接入 DailyHotApi route 命名、通用响应归一化和多平台源表。",
   },
   {
+    repo: "ourongxing/newsnow",
+    url: "https://github.com/ourongxing/newsnow",
+    role: "api-backend",
+    notes: "MIT 开源的实时资讯聚合器，公开实例提供统一的无凭证 source API。",
+    influence: "接入 NewsNow 作为多站点公共后备，并参考其公开页面/API 解析实现。",
+  },
+  {
     repo: "vikiboss/60s",
     url: "https://github.com/vikiboss/60s",
     role: "api-backend",
-    notes: "公开 60s API，微博、知乎、抖音、百度等接口稳定返回。",
-    influence: "接入 60s 公开接口作为强后备通道。",
+    notes: "公开 60s API，覆盖微博、知乎、抖音、百度和小红书 rednote 等接口。",
+    influence: "接入 60s 公开接口作为强后备通道，并以 rednote 支持无登录小红书热榜。",
+  },
+  {
+    repo: "驼城API/公开热榜",
+    url: "https://api.tcslw.cn/doc/hotlist.html",
+    role: "api-backend",
+    notes: "无需 Key 的公开热榜接口，当前覆盖搜狗、快手、网易等榜单。",
+    influence: "作为缺少稳定原生公开端点的平台后备，并在结果中明确标注实际后端。",
   },
   {
     repo: "joyce677/TrendRadar",
@@ -438,31 +491,31 @@ export const HOTSPOT_PROJECT_REFERENCES: HotspotProjectReference[] = [
 ];
 
 const SOURCES: HotspotSource[] = [
-  { code: "weibo", label: "微博", category: "社交热搜", color: "#ff5d7d", weight: 1.18, orzPlatform: "weibo", dailyHotRoute: "weibo", sixtyRoute: "weibo", nativeFetcher: fetchNativeWeibo },
-  { code: "baidu", label: "百度", category: "公共事件", color: "#6ea8ff", weight: 1.08, orzPlatform: "baidu", dailyHotRoute: "baidu", sixtyRoute: "baidu/hot" },
-  { code: "zhihu", label: "知乎", category: "深度讨论", color: "#66d6a8", weight: 1.02, orzPlatform: "zhihu", dailyHotRoute: "zhihu", sixtyRoute: "zhihu", nativeFetcher: fetchNativeZhihu },
-  { code: "douyin", label: "抖音", category: "短视频趋势", color: "#ff8a3d", weight: 1.08, orzPlatform: "douyin", dailyHotRoute: "douyin", sixtyRoute: "douyin" },
-  { code: "bilibili", label: "B站", category: "视频社区", color: "#7bd8ff", weight: 0.96, orzPlatform: "bilibili", dailyHotRoute: "bilibili", sixtyRoute: "bilibili", nativeFetcher: fetchNativeBilibili },
-  { code: "jinritoutiao", label: "今日头条", category: "资讯热点", color: "#ff7061", weight: 0.98, orzPlatform: "jinritoutiao", dailyHotRoute: "toutiao", sixtyRoute: "toutiao" },
-  { code: "github", label: "GitHub", category: "技术项目", color: "#b7c4d6", weight: 0.9, orzPlatform: "github", dailyHotRoute: "github", nativeFetcher: fetchNativeGitHub },
-  { code: "hackernews", label: "Hacker News", category: "技术讨论", color: "#f6a04d", weight: 0.86, orzPlatform: "hackernews", dailyHotRoute: "hackernews", nativeFetcher: fetchNativeHackerNews },
-  { code: "juejin", label: "掘金", category: "开发者社区", color: "#6aa8ff", weight: 0.84, orzPlatform: "juejin", dailyHotRoute: "juejin" },
-  { code: "sspai", label: "少数派", category: "数字生活", color: "#e46b7c", weight: 0.82, orzPlatform: "sspai", dailyHotRoute: "sspai", cookieBackend: true },
-  { code: "kuaishou", label: "快手", category: "短视频趋势", color: "#ffb020", weight: 0.9, dailyHotRoute: "kuaishou", cookieBackend: true },
-  { code: "tieba", label: "贴吧", category: "兴趣社区", color: "#5da2ff", weight: 0.82, dailyHotRoute: "tieba", nativeFetcher: fetchNativeTieba },
-  { code: "thepaper", label: "澎湃新闻", category: "公共事件", color: "#7cc4ff", weight: 0.9, dailyHotRoute: "thepaper", nativeFetcher: fetchNativeThePaper },
-  { code: "ithome", label: "IT之家", category: "科技资讯", color: "#ff6b6b", weight: 0.86, dailyHotRoute: "ithome", nativeFetcher: fetchNativeIthome },
-  { code: "netease-news", label: "网易新闻", category: "资讯热点", color: "#dc2626", weight: 0.86, dailyHotRoute: "netease-news", nativeFetcher: fetchNativeNetease },
-  { code: "qq-news", label: "腾讯新闻", category: "资讯热点", color: "#4f9bff", weight: 0.84, dailyHotRoute: "qq-news", cookieBackend: true },
-  { code: "36kr", label: "36氪", category: "财经商业", color: "#4ade80", weight: 0.84, dailyHotRoute: "36kr", cookieBackend: true },
-  { code: "hupu", label: "虎扑", category: "体育社区", color: "#f59e0b", weight: 0.8, dailyHotRoute: "hupu", cookieBackend: true },
-  { code: "v2ex", label: "V2EX", category: "开发者社区", color: "#94a3b8", weight: 0.8, dailyHotRoute: "v2ex", nativeFetcher: fetchNativeV2ex },
+  { code: "weibo", label: "微博", category: "社交热搜", color: "#ff5d7d", weight: 1.18, orzPlatform: "weibo", dailyHotRoute: "weibo", sixtyRoute: "weibo", newsNowId: "weibo", nativeFetcher: fetchNativeWeibo },
+  { code: "baidu", label: "百度", category: "公共事件", color: "#6ea8ff", weight: 1.08, orzPlatform: "baidu", dailyHotRoute: "baidu", sixtyRoute: "baidu/hot", newsNowId: "baidu" },
+  { code: "zhihu", label: "知乎", category: "深度讨论", color: "#66d6a8", weight: 1.02, orzPlatform: "zhihu", dailyHotRoute: "zhihu", sixtyRoute: "zhihu", newsNowId: "zhihu", nativeFetcher: fetchNativeZhihu },
+  { code: "douyin", label: "抖音", category: "短视频趋势", color: "#ff8a3d", weight: 1.08, orzPlatform: "douyin", dailyHotRoute: "douyin", sixtyRoute: "douyin", newsNowId: "douyin" },
+  { code: "bilibili", label: "B站", category: "视频社区", color: "#7bd8ff", weight: 0.96, orzPlatform: "bilibili", dailyHotRoute: "bilibili", sixtyRoute: "bili", newsNowId: "bilibili-hot-search", nativeFetcher: fetchNativeBilibili },
+  { code: "jinritoutiao", label: "今日头条", category: "资讯热点", color: "#ff7061", weight: 0.98, orzPlatform: "jinritoutiao", dailyHotRoute: "toutiao", sixtyRoute: "toutiao", newsNowId: "toutiao" },
+  { code: "github", label: "GitHub", category: "技术项目", color: "#b7c4d6", weight: 0.9, orzPlatform: "github", dailyHotRoute: "github", newsNowId: "github-trending-today", nativeFetcher: fetchNativeGitHub },
+  { code: "hackernews", label: "Hacker News", category: "技术讨论", color: "#f6a04d", weight: 0.86, orzPlatform: "hackernews", dailyHotRoute: "hackernews", sixtyRoute: "hacker-news/top", newsNowId: "hackernews", nativeFetcher: fetchNativeHackerNews },
+  { code: "juejin", label: "掘金", category: "开发者社区", color: "#6aa8ff", weight: 0.84, orzPlatform: "juejin", dailyHotRoute: "juejin", newsNowId: "juejin" },
+  { code: "sspai", label: "少数派", category: "数字生活", color: "#e46b7c", weight: 0.82, orzPlatform: "shaoshupai", dailyHotRoute: "sspai", newsNowId: "sspai", cookieBackend: true, nativeFetcher: fetchNativeSspai },
+  { code: "kuaishou", label: "快手", category: "短视频趋势", color: "#ffb020", weight: 0.9, dailyHotRoute: "kuaishou", newsNowId: "kuaishou", tuochengPath: "/api/hotlist/kuaishou", cookieBackend: true, nativeFetcher: fetchNativeKuaishou },
+  { code: "tieba", label: "贴吧", category: "兴趣社区", color: "#5da2ff", weight: 0.82, dailyHotRoute: "tieba", newsNowId: "tieba", nativeFetcher: fetchNativeTieba },
+  { code: "thepaper", label: "澎湃新闻", category: "公共事件", color: "#7cc4ff", weight: 0.9, dailyHotRoute: "thepaper", newsNowId: "thepaper", nativeFetcher: fetchNativeThePaper },
+  { code: "ithome", label: "IT之家", category: "科技资讯", color: "#ff6b6b", weight: 0.86, dailyHotRoute: "ithome", newsNowId: "ithome", nativeFetcher: fetchNativeIthome },
+  { code: "netease-news", label: "网易新闻", category: "资讯热点", color: "#dc2626", weight: 0.86, dailyHotRoute: "netease-news", tuochengPath: "/api/hotlist?type=netease_news", nativeFetcher: fetchNativeNetease },
+  { code: "qq-news", label: "腾讯新闻", category: "资讯热点", color: "#4f9bff", weight: 0.84, orzPlatform: "tenxunwang", dailyHotRoute: "qq-news", newsNowId: "tencent-hot", cookieBackend: true, nativeFetcher: fetchNativeQqNews },
+  { code: "36kr", label: "36氪", category: "财经商业", color: "#4ade80", weight: 0.84, orzPlatform: "36kr", dailyHotRoute: "36kr", newsNowId: "36kr-renqi", cookieBackend: true, nativeFetcher: fetchNative36Kr },
+  { code: "hupu", label: "虎扑", category: "体育社区", color: "#f59e0b", weight: 0.8, orzPlatform: "hupu", dailyHotRoute: "hupu", newsNowId: "hupu", cookieBackend: true, nativeFetcher: fetchNativeHupu },
+  { code: "v2ex", label: "V2EX", category: "开发者社区", color: "#94a3b8", weight: 0.8, orzPlatform: "v2ex", dailyHotRoute: "v2ex", newsNowId: "v2ex-share", nativeFetcher: fetchNativeV2ex },
   { code: "hellogithub", label: "HelloGitHub", category: "技术项目", color: "#22c55e", weight: 0.78, dailyHotRoute: "hellogithub", nativeFetcher: fetchNativeHelloGitHub },
-  { code: "xiaohongshu", label: "小红书", category: "生活方式", color: "#ff2d55", weight: 0.92, dailyHotRoute: "xiaohongshu", cookieBackend: true },
-  { code: "so360", label: "360搜索", category: "搜索热榜", color: "#60d394", weight: 0.78, dailyHotRoute: "so360", cookieBackend: true },
-  { code: "sogou", label: "搜狗", category: "搜索热榜", color: "#f97316", weight: 0.78, dailyHotRoute: "sogou", cookieBackend: true },
-  { code: "sina", label: "新浪", category: "资讯热点", color: "#f43f5e", weight: 0.78, dailyHotRoute: "sina", cookieBackend: true },
-  { code: "douban-movie", label: "豆瓣电影", category: "文娱内容", color: "#22c55e", weight: 0.74, dailyHotRoute: "douban-movie", nativeFetcher: fetchNativeDoubanMovie },
+  { code: "xiaohongshu", label: "小红书", category: "生活方式", color: "#ff2d55", weight: 0.92, sixtyRoute: "rednote", cookieBackend: true },
+  { code: "ifeng", label: "凤凰网", category: "资讯热点", color: "#b91c1c", weight: 0.8, newsNowId: "ifeng", nativeFetcher: fetchNativeIfeng },
+  { code: "sogou", label: "搜狗", category: "搜索热榜", color: "#f97316", weight: 0.78, tuochengPath: "/api/hotlist?type=sogou", cookieBackend: true },
+  { code: "sina", label: "新浪", category: "资讯热点", color: "#f43f5e", weight: 0.78, dailyHotRoute: "sina", cookieBackend: true, nativeFetcher: fetchNativeSina },
+  { code: "douban-movie", label: "豆瓣电影", category: "文娱内容", color: "#22c55e", weight: 0.74, dailyHotRoute: "douban-movie", newsNowId: "douban", nativeFetcher: fetchNativeDoubanMovie },
 ];
 
 const STOP_WORDS = new Set([
@@ -492,6 +545,7 @@ const STOP_WORDS = new Set([
 ]);
 
 let cachedPayload: { expiresAt: number; payload: HotspotPayload } | null = null;
+let inFlightPublicPayload: Promise<HotspotPayload> | null = null;
 
 export function clearHotspotCache() {
   cachedPayload = null;
@@ -506,6 +560,30 @@ export async function getHotspotPayload(params?: {
   if (!params?.credentialStore && !params?.refresh && cachedPayload && cachedPayload.expiresAt > now) {
     return cachedPayload.payload;
   }
+
+  if (!params?.credentialStore && inFlightPublicPayload) {
+    return inFlightPublicPayload;
+  }
+
+  const request = buildHotspotPayload(params, now);
+  if (params?.credentialStore) return request;
+
+  inFlightPublicPayload = request;
+  try {
+    return await request;
+  } finally {
+    if (inFlightPublicPayload === request) inFlightPublicPayload = null;
+  }
+}
+
+async function buildHotspotPayload(
+  params: {
+    refresh?: boolean;
+    limit?: number;
+    credentialStore?: UserHotspotCookieStore;
+  } | undefined,
+  now: number,
+) {
 
   const results = await Promise.allSettled(
     SOURCES.map((source) => fetchSourceItems(source, params?.credentialStore)),
@@ -525,6 +603,7 @@ export async function getHotspotPayload(params?: {
         count: result.value.length,
         backend: backends.join(" + ") || "无数据",
         requiresCookie: definition.requiresCookie,
+        supportsOptionalConnection: definition.supportsOptionalConnection,
         cookieConfigured: definition.cookieConfigured,
         message: result.value.length ? undefined : "接口可访问但没有返回可用条目",
       });
@@ -537,6 +616,7 @@ export async function getHotspotPayload(params?: {
         count: 0,
         backend: "全部后备失败",
         requiresCookie: definition.requiresCookie,
+        supportsOptionalConnection: definition.supportsOptionalConnection,
         cookieConfigured: definition.cookieConfigured,
         message: result.reason instanceof Error ? result.reason.message : String(result.reason),
       });
@@ -570,10 +650,12 @@ export async function getHotspotPayload(params?: {
       activeSources: sourceHealth.filter((source) => source.ok).length,
       crossPlatformTopics: topics.filter((topic) => topic.sources.length > 1).length,
       backendCount: activeBackends.size,
+      credentialFreeSourceCount: sourceCatalog.filter((source) => source.credentialFree).length,
+      optionalConnectionSourceCount: sourceCatalog.filter((source) => source.supportsOptionalConnection).length,
       cookieSourceCount: sourceCatalog.filter((source) => source.requiresCookie).length,
       cookieConfiguredCount: sourceCatalog.filter((source) => source.requiresCookie && source.cookieConfigured).length,
       projectReferenceCount: HOTSPOT_PROJECT_REFERENCES.length,
-      source: "orz.ai + DailyHotApi + 60s + cookie-backed aggregators + native fetchers + local clustering",
+      source: "站点公开 API/RSS + NewsNow + orz.ai + DailyHotApi + 60s + 驼城API + 本地聚类",
     },
   };
 
@@ -609,6 +691,7 @@ export async function getHotspotSourcePayload(
         count: items.length,
         backend: backends.join(" + ") || "无数据",
         requiresCookie: definition.requiresCookie,
+        supportsOptionalConnection: definition.supportsOptionalConnection,
         cookieConfigured: definition.cookieConfigured,
         message: items.length ? undefined : "接口可访问但没有返回可用条目",
       },
@@ -625,6 +708,7 @@ export async function getHotspotSourcePayload(
         count: 0,
         backend: "全部后备失败",
         requiresCookie: definition.requiresCookie,
+        supportsOptionalConnection: definition.supportsOptionalConnection,
         cookieConfigured: definition.cookieConfigured,
         message: error instanceof Error ? error.message : String(error),
       },
@@ -647,7 +731,13 @@ async function fetchSourceItems(
   if (source.sixtyRoute) {
     attempts.push(fetchSixtySecondItems(source));
   }
-  if (source.cookieBackend) {
+  if (source.newsNowId) {
+    attempts.push(fetchNewsNowItems(source));
+  }
+  if (source.tuochengPath) {
+    attempts.push(fetchTuochengItems(source));
+  }
+  if (source.cookieBackend && hasOptionalBackendConfig(source, credentialStore)) {
     attempts.push(fetchCookieBackendItems(source, credentialStore));
   }
   if (source.nativeFetcher) {
@@ -696,13 +786,43 @@ async function fetchSixtySecondItems(source: HotspotSource): Promise<HotspotSour
   return normalizeItems(extractItemArray(json), source, "60s");
 }
 
+async function fetchNewsNowItems(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const url = new URL(NEWS_NOW_BASE);
+  url.searchParams.set("id", source.newsNowId ?? source.code);
+  const json = await fetchJson<GenericHotResponse>(url.toString(), "NewsNow");
+  return normalizeItems(extractItemArray(json), source, "NewsNow");
+}
+
+async function fetchTuochengItems(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const json = await fetchJson<GenericHotResponse>(
+    `${TUOCHENG_API_BASE}${source.tuochengPath}`,
+    "驼城API",
+  );
+  return normalizeItems(extractItemArray(json), source, "驼城API");
+}
+
+function hasOptionalBackendConfig(
+  source: HotspotSource,
+  credentialStore?: UserHotspotCookieStore,
+) {
+  const config = getCookieBackend(source.code);
+  if (!config) return false;
+  const stored = credentialStore?.[source.code] ?? getStoredHotspotCookieConfig(source.code);
+  const allowShared = areSharedHotspotCredentialsAllowed();
+  return Boolean(
+    stored?.cookie ||
+    stored?.upstream ||
+    (allowShared && (process.env[config.cookieEnv] || process.env[config.upstreamEnv])),
+  );
+}
+
 async function fetchCookieBackendItems(
   source: HotspotSource,
   credentialStore?: UserHotspotCookieStore,
 ): Promise<HotspotSourceItem[]> {
   const config = getCookieBackend(source.code);
   if (!config) {
-    throw new Error(`${source.label} 没有 Cookie 聚合配置`);
+    throw new Error(`${source.label} 没有可选连接配置`);
   }
 
   const stored = credentialStore?.[source.code] ?? getStoredHotspotCookieConfig(source.code);
@@ -710,7 +830,7 @@ async function fetchCookieBackendItems(
   const configuredUpstream = stored?.upstream || (allowShared ? process.env[config.upstreamEnv] : undefined);
   const cookie = stored?.cookie || (allowShared ? process.env[config.cookieEnv] : undefined);
   if (!configuredUpstream && !cookie) {
-    throw new Error(`${source.label} Cookie 聚合待配置：设置 ${config.cookieEnv} 或 ${config.upstreamEnv}`);
+    throw new Error(`${source.label} 可选连接未配置：设置 ${config.cookieEnv} 或 ${config.upstreamEnv}`);
   }
 
   const upstream = configuredUpstream || config.defaultUrl;
@@ -725,12 +845,12 @@ async function fetchCookieBackendItems(
     headers.Cookie = cookie;
   }
 
-  const json = await fetchJson<GenericHotResponse | unknown[]>(upstream, `Cookie聚合:${source.label}`, {
+  const json = await fetchJson<GenericHotResponse | unknown[]>(upstream, `自定义上游:${source.label}`, {
     method: config.method ?? "GET",
     headers,
     body: config.body,
   });
-  return normalizeItems(extractItemArray(json), source, `Cookie聚合:${source.label}`);
+  return normalizeItems(extractItemArray(json), source, `自定义上游:${source.label}`);
 }
 
 async function fetchNativeWeibo(source: HotspotSource): Promise<HotspotSourceItem[]> {
@@ -746,6 +866,152 @@ async function fetchNativeZhihu(source: HotspotSource): Promise<HotspotSourceIte
 async function fetchNativeBilibili(source: HotspotSource): Promise<HotspotSourceItem[]> {
   const json = await fetchJson<GenericHotResponse>("https://api.bilibili.com/x/web-interface/popular?ps=30&pn=1", "B站原生");
   return normalizeItems(extractItemArray(json), source, "B站原生");
+}
+
+async function fetchNativeSspai(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const url = new URL("https://sspai.com/api/v1/article/tag/page/get");
+  url.searchParams.set("limit", "30");
+  url.searchParams.set("offset", "0");
+  url.searchParams.set("tag", "热门文章");
+  const json = await fetchJson<{
+    data?: Array<{ id?: string | number; title?: string; summary?: string; like_count?: number }>;
+  }>(url.toString(), "少数派原生");
+  const items = (json.data ?? []).map((item) => ({
+    title: item.title,
+    url: item.id ? `https://sspai.com/post/${item.id}` : "",
+    desc: item.summary,
+    score: item.like_count,
+  }));
+  return normalizeItems(items, source, "少数派原生");
+}
+
+async function fetchNativeKuaishou(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const html = await fetchText("https://www.kuaishou.com/?isHome=1", "快手公开页");
+  const prefix = "window.__APOLLO_STATE__=";
+  const start = html.indexOf(prefix);
+  if (start < 0) throw new Error("快手公开页未找到热榜状态");
+  const script = html.slice(start + prefix.length);
+  const sentinels = [script.indexOf(";(function("), script.indexOf("</script>")]
+    .filter((index) => index >= 0);
+  const end = sentinels.length ? Math.min(...sentinels) : script.lastIndexOf("}") + 1;
+  const raw = script.slice(0, end).trim().replace(/;$/, "");
+  const lastBrace = raw.lastIndexOf("}");
+  const parsed = JSON.parse(raw.slice(0, lastBrace + 1)) as Record<string, unknown>;
+  const client = (parsed.defaultClient ?? parsed) as Record<string, unknown>;
+  const queryKey = Object.keys(client).find((key) => key.includes("visionHotRank"));
+  const query = queryKey && client[queryKey] && typeof client[queryKey] === "object"
+    ? client[queryKey] as { items?: Array<{ id?: string }> }
+    : undefined;
+  const items = (query?.items ?? []).flatMap((reference) => {
+    if (!reference.id) return [];
+    const item = client[reference.id];
+    if (!item || typeof item !== "object") return [];
+    const record = item as { name?: string; hotValue?: string | number; id?: string };
+    if (!record.name) return [];
+    return [{
+      title: record.name,
+      score: record.hotValue,
+      url: `https://www.kuaishou.com/search/video?searchKey=${encodeURIComponent(record.name)}`,
+    }];
+  });
+  return normalizeItems(items, source, "快手公开页");
+}
+
+async function fetchNativeQqNews(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const json = await fetchJson<{
+    idlist?: Array<{ newslist?: Array<{
+      id?: string;
+      title?: string;
+      abstract?: string;
+      source?: string;
+      hotEvent?: { hotScore?: number };
+    }> }>;
+  }>("https://r.inews.qq.com/gw/event/hot_ranking_list?page_size=50", "腾讯新闻原生");
+  const items = (json.idlist?.[0]?.newslist ?? []).map((item) => ({
+    title: item.title,
+    url: item.id ? `https://new.qq.com/rain/a/${item.id}` : "",
+    desc: [item.source, item.abstract].filter(Boolean).join(" · "),
+    score: item.hotEvent?.hotScore,
+  }));
+  return normalizeItems(items, source, "腾讯新闻原生");
+}
+
+async function fetchNative36Kr(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const json = await fetchJson<{
+    data?: { hotRankList?: Array<{
+      itemId?: string | number;
+      templateMaterial?: {
+        widgetTitle?: string;
+        authorName?: string;
+        statCollect?: number;
+      };
+    }> };
+  }>("https://gateway.36kr.com/api/mis/nav/home/nav/rank/hot", "36氪原生", {
+    method: "POST",
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+    body: JSON.stringify({
+      partner_id: "wap",
+      param: { siteId: 1, platformId: 2 },
+      timestamp: Date.now(),
+    }),
+  });
+  const items = (json.data?.hotRankList ?? []).map((item) => ({
+    title: item.templateMaterial?.widgetTitle,
+    url: item.itemId ? `https://www.36kr.com/p/${item.itemId}` : "",
+    desc: item.templateMaterial?.authorName,
+    score: item.templateMaterial?.statCollect,
+  }));
+  return normalizeItems(items, source, "36氪原生");
+}
+
+async function fetchNativeHupu(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const json = await fetchJson<{
+    data?: { topicThreads?: Array<{
+      tid?: string | number;
+      title?: string;
+      username?: string;
+      replies?: number;
+      url?: string;
+    }> };
+  }>("https://m.hupu.com/api/v2/bbs/topicThreads?topicId=1&page=1", "虎扑原生");
+  const items = (json.data?.topicThreads ?? []).map((item) => ({
+    title: item.title,
+    url: item.tid ? `https://bbs.hupu.com/${item.tid}.html` : item.url,
+    desc: item.username,
+    score: item.replies,
+  }));
+  return normalizeItems(items, source, "虎扑原生");
+}
+
+async function fetchNativeSina(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const json = await fetchJson<{
+    data?: { hotList?: Array<{
+      base?: { base?: { uniqueId?: string; url?: string } };
+      info?: { title?: string; hotValue?: string | number };
+    }> };
+  }>("https://newsapp.sina.cn/api/hotlist?newsId=HB-1-snhs%2Ftop_news_list-all", "新浪原生");
+  const items = (json.data?.hotList ?? []).map((item) => ({
+    title: item.info?.title,
+    url: item.base?.base?.url,
+    score: item.info?.hotValue,
+  }));
+  return normalizeItems(items, source, "新浪原生");
+}
+
+async function fetchNativeIfeng(source: HotspotSource): Promise<HotspotSourceItem[]> {
+  const html = await fetchText("https://www.ifeng.com/", "凤凰网公开页");
+  const match = html.match(/var\s+allData\s*=\s*(\{[\s\S]*?\});/);
+  if (!match) throw new Error("凤凰网公开页未找到热点数据");
+  const parsed = JSON.parse(match[1]) as {
+    hotNews1?: Array<{ url?: string; title?: string; newsTime?: string }>;
+  };
+  const items = (parsed.hotNews1 ?? []).map((item, index) => ({
+    title: item.title,
+    url: item.url,
+    desc: item.newsTime,
+    score: 20000 - index * 550,
+  }));
+  return normalizeItems(items, source, "凤凰网公开页");
 }
 
 async function fetchNativeHackerNews(source: HotspotSource): Promise<HotspotSourceItem[]> {
@@ -918,6 +1184,7 @@ function extractItemArray(response: unknown): unknown[] {
     record.result,
     record.news,
     record.list,
+    record.items,
     record.subjects,
     pickNested(record.data, ["list", "items", "data", "cards", "realtime", "hot", "rank"]),
     pickNested(record.result, ["list", "items", "data", "cards", "realtime", "hot", "rank"]),
@@ -1344,7 +1611,10 @@ function toSourceDefinition(
     label: source.label,
     category: source.category,
     apiPath: `/api/hotspots/sources/${source.code}`,
-    requiresCookie: Boolean(cookieBackend),
+    credentialFree: true,
+    publicBackends: getPublicBackendLabels(source),
+    requiresCookie: false,
+    supportsOptionalConnection: Boolean(cookieBackend),
     cookieConfigured:
       environmentCookieConfigured ||
       environmentUpstreamConfigured ||
@@ -1358,6 +1628,17 @@ function toSourceDefinition(
     upstreamEnv: cookieBackend?.upstreamEnv,
     notes: cookieBackend?.notes,
   };
+}
+
+function getPublicBackendLabels(source: HotspotSource) {
+  return [
+    source.nativeFetcher ? "站点公开入口" : undefined,
+    source.sixtyRoute ? "60s" : undefined,
+    source.newsNowId ? "NewsNow" : undefined,
+    source.orzPlatform ? "orz.ai" : undefined,
+    source.dailyHotRoute ? "DailyHotApi" : undefined,
+    source.tuochengPath ? "驼城API" : undefined,
+  ].filter((label): label is string => Boolean(label));
 }
 
 function getCookieBackend(code: HotspotPlatformCode) {

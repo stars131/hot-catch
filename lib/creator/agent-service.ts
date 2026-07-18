@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { jobErrorMessageKey, safeJobErrorMessage } from "@/lib/jobs/error-messages";
 import { resolveSelectedSkills } from "@/lib/services/skill-service";
 import { AppError } from "@/lib/errors";
-import { CHAT_PROTOCOL, type ChatCard, type CardAction } from "@/lib/creator/chat-protocol";
+import { CHAT_PROTOCOL, type ChatCard, type CardAction, type EntityRef } from "@/lib/creator/chat-protocol";
 import {
   chatMessageMetadataV1Schema,
   parseChatMessageMetadata,
@@ -26,8 +26,13 @@ import {
 import { buildPublishReadinessReply } from "@/lib/creator/publish-handoff";
 import { assertUrlSafe } from "@/lib/security/url-guard";
 import { enqueueJob } from "@/lib/jobs/queues";
-import { buildCreationSetupCard } from "@/lib/creator/creation-setup";
 import type { UiLocale } from "@/lib/platforms/registry";
+import { appendConversationEvent } from "@/lib/events/event-service";
+import { createPendingInteraction } from "@/lib/services/interaction-service";
+import { compactConversationIfNeeded } from "@/lib/services/conversation-history-service";
+import { createConversationContextVersion } from "@/lib/services/conversation-context-service";
+import { claimNextQueuedTurn, completeQueuedTurn } from "@/lib/services/queue-service";
+import { recommendCreativeDirections } from "@/lib/services/creative-direction-service";
 
 /**
  * C3 Agent 服务:消息、卡片动作与 AgentRun 的唯一服务端入口。
@@ -44,30 +49,15 @@ import type { UiLocale } from "@/lib/platforms/registry";
 const ASSISTANT_KEY_PREFIX = "assistant:";
 const ACTION_KEY_PREFIX = "action:";
 
-export type AgentReply = { text: string; cards: ChatCard[] };
+export type AgentReply = { text: string; cards: ChatCard[]; command?: string };
 
 export type ReplyBuilder = (input: {
   userId: string;
   conversationId: string;
   text: string;
   uiLocale?: UiLocale;
+  sourceMessageId?: string;
 }) => Promise<AgentReply> | AgentReply;
-
-const DIRECTION_CARD_ID = "card-direction";
-
-async function conversationHasDirectionCard(conversationId: string): Promise<boolean> {
-  const candidates = await prisma.message.findMany({
-    where: { conversationId, role: "assistant", metadata: { not: Prisma.AnyNull } },
-    orderBy: { createdAt: "desc" },
-    take: 50,
-    select: { metadata: true },
-  });
-  return candidates.some((message) =>
-    parseChatMessageMetadata(message.metadata)?.cards.some(
-      (card) => card.id === DIRECTION_CARD_ID,
-    ),
-  );
-}
 
 /** 参考卡上的标准动作集(content/webpage 导入)。 */
 export function referenceCardActions(): CardAction[] {
@@ -153,46 +143,53 @@ async function buildImportReply(params: {
 }
 
 /** C3/C4 默认回复:确定性中文文案;URL 消息在 handleUserMessage 中走导入分支。 */
-export const buildDefaultReply: ReplyBuilder = async ({ userId, conversationId, text, uiLocale = "zh-CN" }) => {
-  if (!(await conversationHasDirectionCard(conversationId))) {
-    const zh = uiLocale === "zh-CN";
-    return {
-      text: zh
-        ? "收到。先确认这次内容采用什么表达方向，随后我会把平台、语言和 Skill 选择卡放在同一条对话里。"
-        : "Got it. Choose a direction first, then I’ll keep platform, language and Skill selection in this conversation.",
-      cards: [
-        {
-          id: DIRECTION_CARD_ID,
-          version: 1,
-          type: "option",
-          title: zh ? "选择内容方向" : "Choose a content direction",
-          mode: "single",
-          options: [
-            { id: "direction-experience", label: zh ? "经验分享" : "Experience-led", description: zh ? "以个人经历和感受带出方法" : "Lead with lived experience and practical lessons", recommended: true },
-            { id: "direction-checklist", label: zh ? "步骤清单" : "Step-by-step", description: zh ? "按步骤给出可执行做法" : "Turn the idea into concrete actions" },
-            { id: "direction-contrarian", label: zh ? "反常识观点" : "Contrarian angle", description: zh ? "用一个出人意料的判断切入" : "Open with a surprising but defensible point" },
-          ],
-          submitAction: { actionId: "direction.choose", label: zh ? "确认方向" : "Confirm direction", appearance: "primary" },
-          uiLocale,
-        },
-      ],
-    };
-  }
-
+export const buildDefaultReply: ReplyBuilder = async ({
+  userId,
+  conversationId,
+  text,
+  uiLocale = "zh-CN",
+  sourceMessageId,
+}) => {
+  const result = await recommendCreativeDirections({
+    userId,
+    conversationId,
+    sourceMessageId,
+    brief: text,
+    uiLocale,
+  });
+  const zh = uiLocale === "zh-CN";
   return {
-    text:
-      uiLocale === "zh-CN"
-        ? "我已把这段补充作为新的创作要求。请在卡片里确认本次平台、内容语言和 Skill。"
-        : "I’ve added this as a new creation requirement. Confirm the platforms, content language and Skills below.",
-    cards: [
-      await buildCreationSetupCard({
-        userId,
-        conversationId,
-        brief: text,
-        uiLocale,
-        nonce: `${Date.now()}:${text}`,
-      }),
-    ],
+    text: result.analysis.needsInput
+      ? (zh
+          ? "我先分析了主题，但还缺少会明显影响方向判断的信息。请在卡片中补充后继续。"
+          : "I analyzed the topic, but a few details would materially change the direction. Add them in the card to continue.")
+      : (zh
+          ? "我结合主题、当前人设和平台整理了 3 个表达方向。确认主方向后，可再选择一个辅方向。"
+          : "I ranked three directions using the brief, current persona, and platform. Confirm a primary direction and optionally add a secondary one."),
+    cards: [{
+      id: `card-direction-${result.decisionId.slice(-12)}`,
+      version: 1,
+      type: "direction_recommendation",
+      decisionId: result.decisionId,
+      brief: text,
+      uiLocale,
+      source: result.analysis.source,
+      intentSummary: result.analysis.intentSummary,
+      state: result.analysis.needsInput ? "needs_input" : "ready",
+      missingInputs: result.analysis.missingInputs,
+      recommendations: result.analysis.recommendations,
+      confirmAction: {
+        actionId: "direction.confirm",
+        label: zh ? "确认方向" : "Confirm direction",
+        appearance: "primary",
+      },
+      supplementAction: {
+        actionId: "direction.supplement",
+        label: zh ? "补充并重新分析" : "Add details and reanalyze",
+        appearance: "primary",
+      },
+    }],
+    command: "direction.analyze",
   };
 };
 
@@ -382,8 +379,11 @@ export async function handleUserMessage(params: {
   skillIds?: string[];
   patchTarget?: PatchTarget;
   publishTarget?: PublishTarget;
+  entityRefs?: EntityRef[];
   uiLocale?: UiLocale;
   replyBuilder?: ReplyBuilder;
+  /** Internal guard used while draining QueuedTurn rows. */
+  skipQueueDrain?: boolean;
 }) {
   const conversation = await requireConversation(params.userId, params.conversationId);
 
@@ -397,6 +397,21 @@ export async function handleUserMessage(params: {
     selectedSkillIds,
     "generation",
   );
+  const latestContext = await prisma.conversationContextVersion.findFirst({
+    where: { conversationId: params.conversationId, userId: params.userId },
+    orderBy: { version: "desc" },
+    select: { accountBindings: true },
+  });
+  const contextVersion = await createConversationContextVersion({
+    userId: params.userId,
+    conversationId: params.conversationId,
+    accountBindings: asAccountBindings(latestContext?.accountBindings),
+    targetPlatforms: conversation.targetPlatforms,
+    contentLocale: conversation.targetLocale,
+    skills: selectedSkills,
+    references: params.entityRefs,
+    promptVersion: "chat.reply/v1",
+  });
 
   let created;
   try {
@@ -408,6 +423,7 @@ export async function handleUserMessage(params: {
           content: params.text,
           status: "complete",
           clientMessageId: params.clientMessageId,
+          metadata: params.entityRefs?.length ? { entityRefs: params.entityRefs } : undefined,
         },
       });
       const assistantMessage = await tx.message.create({
@@ -427,10 +443,12 @@ export async function handleUserMessage(params: {
           assistantMessageId: assistantMessage.id,
           status: "running",
           command: "chat.reply",
+          contextVersionId: contextVersion.id,
           input: {
             text: params.text.slice(0, 500),
             skillIds: selectedSkills.map((skill) => skill.id),
             skills: selectedSkills,
+            entityRefs: params.entityRefs ?? [],
           } as Prisma.InputJsonValue,
           startedAt: new Date(),
         },
@@ -452,6 +470,12 @@ export async function handleUserMessage(params: {
     }
     throw error;
   }
+
+  await Promise.allSettled([
+    appendConversationEvent({ userId: params.userId, conversationId: params.conversationId, type: "message.created", messageId: created.userMessage.id, payload: { messageId: created.userMessage.id, role: "user", status: created.userMessage.status } }),
+    appendConversationEvent({ userId: params.userId, conversationId: params.conversationId, type: "message.created", messageId: created.assistantMessage.id, payload: { messageId: created.assistantMessage.id, role: "assistant", status: created.assistantMessage.status } }),
+    appendConversationEvent({ userId: params.userId, conversationId: params.conversationId, type: "run.created", runId: created.run.id, payload: { runId: created.run.id, status: created.run.status, command: created.run.command } }),
+  ]);
 
   const builder = params.replyBuilder ?? buildDefaultReply;
   try {
@@ -488,6 +512,7 @@ export async function handleUserMessage(params: {
             conversationId: params.conversationId,
             text: params.text,
             uiLocale: params.uiLocale,
+            sourceMessageId: created.userMessage.id,
           });
     const metadata = buildMetadata(reply.cards, created.run.id);
     // 就绪检查等分支会声明真实命令(如 publish.prepare),落到 AgentRun 便于追溯
@@ -507,6 +532,31 @@ export async function handleUserMessage(params: {
         },
       }),
     ]);
+    await Promise.allSettled([
+      appendConversationEvent({ userId: params.userId, conversationId: params.conversationId, type: "message.updated", messageId: assistantMessage.id, runId: run.id, payload: { messageId: assistantMessage.id, status: assistantMessage.status, ...(assistantMessage.metadata === null ? {} : { metadata: assistantMessage.metadata }) } }),
+      appendConversationEvent({ userId: params.userId, conversationId: params.conversationId, type: "run.updated", runId: run.id, payload: { runId: run.id, status: run.status, command: run.command } }),
+      ...reply.cards.filter((card) => card.type === "approval").map((card) => createPendingInteraction({ userId: params.userId, conversationId: params.conversationId, agentRunId: run.id, messageId: assistantMessage.id, kind: "approval", actionKey: `${card.id}:${card.confirmAction.actionId}`, payload: { cardId: card.id, title: card.title, summary: card.summary, risk: card.risk } })),
+      ...reply.cards.flatMap((card) => {
+        if (card.type !== "direction_recommendation" || card.state !== "needs_input") return [];
+        return [createPendingInteraction({
+          userId: params.userId,
+          conversationId: params.conversationId,
+          agentRunId: run.id,
+          messageId: assistantMessage.id,
+          kind: "input",
+          actionKey: `${card.id}:${card.supplementAction.actionId}`,
+          payload: {
+            cardId: card.id,
+            decisionId: card.decisionId,
+            missingInputs: card.missingInputs,
+          },
+        })];
+      }),
+    ]);
+    await compactConversationIfNeeded(params.userId, params.conversationId).catch(() => null);
+    if (!params.skipQueueDrain) {
+      await drainQueuedTurns(params.userId, params.conversationId).catch(() => null);
+    }
     return { userMessage: created.userMessage, assistantMessage, run, replayed: false };
   } catch (error) {
     const reason = error instanceof Error ? error.message : "未知错误";
@@ -520,8 +570,43 @@ export async function handleUserMessage(params: {
         data: { status: "failed", completedAt: new Date(), errorMessage: reason },
       }),
     ]);
+    await Promise.allSettled([
+      appendConversationEvent({ userId: params.userId, conversationId: params.conversationId, type: "message.updated", messageId: assistantMessage.id, runId: run.id, payload: { messageId: assistantMessage.id, status: assistantMessage.status } }),
+      appendConversationEvent({ userId: params.userId, conversationId: params.conversationId, type: "run.updated", runId: run.id, payload: { runId: run.id, status: run.status, errorMessage: run.errorMessage } }),
+    ]);
+    if (!params.skipQueueDrain) {
+      await drainQueuedTurns(params.userId, params.conversationId).catch(() => null);
+    }
     return { userMessage: created.userMessage, assistantMessage, run, replayed: false };
   }
+}
+
+/**
+ * A completed run releases the conversation queue. Keep the loop bounded so one
+ * HTTP request cannot monopolize a worker when a client has accumulated a large queue.
+ */
+export async function drainQueuedTurns(userId: string, conversationId: string, limit = 25) {
+  let processed = 0;
+  while (processed < limit) {
+    const turn = await claimNextQueuedTurn(userId, conversationId);
+    if (!turn) break;
+    try {
+      const context = asQueuedContext(turn.context);
+      const result = await handleUserMessage({
+        userId,
+        conversationId,
+        text: turn.content,
+        clientMessageId: turn.clientTurnId,
+        skillIds: context.skillIds,
+        skipQueueDrain: true,
+      });
+      await completeQueuedTurn(turn.id, result.run?.status === "failed");
+    } catch {
+      await completeQueuedTurn(turn.id, true);
+    }
+    processed += 1;
+  }
+  return processed;
 }
 
 export async function listConversationMessages(params: {
@@ -531,38 +616,79 @@ export async function listConversationMessages(params: {
   limit?: number;
 }) {
   const conversation = await requireConversation(params.userId, params.conversationId);
-  const limit = Math.min(Math.max(params.limit ?? 200, 1), 200);
-  const messages = await prisma.message.findMany({
+  const limit = Math.min(Math.max(params.limit ?? 5_000, 1), 5_000);
+  // 读取最近窗口并反转为时间正序，配合客户端动态高度虚拟列表。
+  // cursor 指向当前窗口最旧消息，用于后续按需继续向前加载。
+  const messagesDescending = await prisma.message.findMany({
     where: { conversationId: params.conversationId },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     ...(params.cursor ? { cursor: { id: params.cursor }, skip: 1 } : {}),
     take: limit,
   });
+  const messages = messagesDescending.reverse();
   // 已处理动作键:客户端据此把已消费的卡片置为 disabled
   const processedActionKeys = messages
     .map((message) => message.clientMessageId)
     .filter((key): key is string => Boolean(key?.startsWith(ACTION_KEY_PREFIX)));
-  const activeRun = await prisma.agentRun.findFirst({
-    where: {
-      conversationId: params.conversationId,
-      userId: params.userId,
-      status: { in: ["pending", "running", "waiting_input"] },
-    },
-    orderBy: { createdAt: "desc" },
-    select: { id: true, status: true, command: true },
-  });
+  const [activeRun, runTraces, checkpoints] = await Promise.all([
+    prisma.agentRun.findFirst({
+      where: {
+        conversationId: params.conversationId,
+        userId: params.userId,
+        status: { in: ["pending", "running", "waiting_input"] },
+      },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, status: true, command: true },
+    }),
+    prisma.agentRun.findMany({
+      where: { conversationId: params.conversationId, userId: params.userId },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      select: {
+        id: true,
+        status: true,
+        command: true,
+        errorCode: true,
+        startedAt: true,
+        completedAt: true,
+        createdAt: true,
+        contextVersion: { select: { modelName: true } },
+        jobs: {
+          orderBy: { createdAt: "asc" },
+          select: { id: true, status: true, stage: true, progress: true, errorCode: true },
+        },
+      },
+    }),
+    prisma.conversationSegment.findMany({
+      where: { conversationId: params.conversationId, userId: params.userId },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      select: {
+        id: true,
+        summary: true,
+        ledger: true,
+        messageCount: true,
+        tokenEstimate: true,
+        createdAt: true,
+      },
+    }),
+  ]);
   return {
     messages,
     processedActionKeys,
     activeRun,
+    runTraces,
+    checkpoints,
     activeSkillIds: conversation.activeSkillIds,
-    nextCursor: messages.length === limit ? messages[messages.length - 1].id : null,
+    nextCursor: messages.length === limit ? messages[0].id : null,
   };
 }
 
 function findCardAction(card: ChatCard, actionId: string): CardAction | null {
   const candidates: CardAction[] = [];
   if (card.type === "option") candidates.push(card.submitAction);
+  if (card.type === "direction_recommendation")
+    candidates.push(card.confirmAction, card.supplementAction);
   if (card.type === "creation_setup") candidates.push(card.confirmAction);
   if (card.type === "idea_candidates")
     candidates.push(card.chooseAction, card.skipAction);
@@ -677,6 +803,20 @@ export async function invokeCardAction(params: {
       });
       return { resultMessage, run };
     });
+    const pending = await prisma.pendingInteraction.findFirst({
+      where: { userId: params.userId, conversationId: params.conversationId, messageId: params.sourceMessageId, status: "pending" },
+    });
+    if (pending && card.type === "approval") {
+      await prisma.pendingInteraction.update({
+        where: { id: pending.id },
+        data: { status: params.actionId === card.cancelAction.actionId ? "canceled" : "resolved", resolution: { actionId: params.actionId }, resolvedAt: new Date() },
+      });
+    }
+    await Promise.allSettled([
+      appendConversationEvent({ userId: params.userId, conversationId: params.conversationId, type: "message.created", messageId: resultMessage.id, runId: run.id, payload: { messageId: resultMessage.id, role: resultMessage.role, status: resultMessage.status } }),
+      appendConversationEvent({ userId: params.userId, conversationId: params.conversationId, type: "run.updated", runId: run.id, payload: { runId: run.id, status: run.status, command: run.command } }),
+      ...(pending ? [appendConversationEvent({ userId: params.userId, conversationId: params.conversationId, type: "interaction.updated" as const, payload: { interactionId: pending.id, status: params.actionId === (card.type === "approval" ? card.cancelAction.actionId : "") ? "canceled" : "resolved" } })] : []),
+    ]);
     return { resultMessage, run, replayed: false };
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -747,5 +887,21 @@ export async function cancelAgentRun(userId: string, runId: string) {
         ]
       : []),
   ]);
+  if (updated.conversationId) {
+    await appendConversationEvent({ userId, conversationId: updated.conversationId, type: "run.updated", runId: updated.id, payload: { runId: updated.id, status: updated.status } });
+  }
   return updated;
+}
+
+function asAccountBindings(value: Prisma.JsonValue | null | undefined) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+}
+
+function asQueuedContext(value: Prisma.JsonValue | null | undefined): { skillIds?: string[] } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const skillIds = (value as Prisma.JsonObject).skillIds;
+  return Array.isArray(skillIds)
+    ? { skillIds: skillIds.filter((item): item is string => typeof item === "string") }
+    : {};
 }

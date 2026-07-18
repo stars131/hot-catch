@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Bookmark,
+  Cable,
   Check,
   ChevronRight,
   CircleAlert,
   Flame,
-  KeyRound,
   Loader2,
   RefreshCw,
   Save,
@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
+import { XDiscoveryPanel } from "@/components/hotspots/x-discovery-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,6 +40,11 @@ import type {
   HotspotSourceHealth,
   HotspotTopic,
 } from "@/lib/hotspots/hotspot-service";
+import {
+  HOTSPOT_BROWSER_CACHE_MS,
+  readHotspotBrowserCache,
+  writeHotspotBrowserCache,
+} from "@/lib/hotspots/browser-cache";
 
 type WindowValue = "1小时" | "24小时" | "7天";
 
@@ -78,8 +84,8 @@ export default function HotspotsPage() {
   const [insights, setInsights] = useState<HotspotAiInsightView[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
 
-  const load = useCallback(async (refresh = false) => {
-    setLoading(true);
+  const load = useCallback(async (refresh = false, background = false) => {
+    if (!background) setLoading(true);
     setError(null);
     try {
       const response = await fetch(`/api/hotspots${refresh ? "?refresh=1" : ""}`, {
@@ -87,20 +93,36 @@ export default function HotspotsPage() {
       });
       const next = await readApiJson<HotspotPayload>(response);
       setPayload(next);
+      writeHotspotBrowserCache(next);
       setSelectedId((current) =>
         current && next.topics.some((topic) => topic.id === current)
           ? current
           : next.topics[0]?.id ?? null,
       );
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "热点加载失败");
+      if (!background) setError(cause instanceof Error ? cause.message : "热点加载失败");
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void load();
+    const cached = readHotspotBrowserCache();
+    if (cached) {
+      setPayload(cached.payload);
+      setSelectedId(cached.payload.topics[0]?.id ?? null);
+      setLoading(false);
+      if (Date.now() - cached.storedAt >= HOTSPOT_BROWSER_CACHE_MS) {
+        void load(false, true);
+      }
+    } else {
+      void load();
+    }
+    const interval = window.setInterval(
+      () => void load(false, true),
+      HOTSPOT_BROWSER_CACHE_MS,
+    );
+    return () => window.clearInterval(interval);
   }, [load]);
 
   const topics = useMemo(() => {
@@ -191,7 +213,7 @@ export default function HotspotsPage() {
   }
 
   function openCookie(source?: HotspotSourceDefinition) {
-    const target = source ?? payload?.sourceCatalog.find((item) => item.requiresCookie) ?? null;
+    const target = source ?? payload?.sourceCatalog.find((item) => item.supportsOptionalConnection) ?? null;
     setCookieSource(target);
     setCookie("");
     setUpstream("");
@@ -228,14 +250,14 @@ export default function HotspotsPage() {
       description="汇总多源趋势、保留来源证据；这里不直接生成内容。"
       actions={
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => void analyzeVisibleTopics()} disabled={analyzing || !topics.length}>
-            {analyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} AI 筛选与建议
+          <Button aria-label="AI 筛选与建议" variant="outline" size="sm" onClick={() => void analyzeVisibleTopics()} disabled={analyzing || !topics.length}>
+            {analyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}<span className="hidden sm:inline">AI 筛选与建议</span>
           </Button>
-          <Button variant="outline" size="sm" onClick={() => openCookie()}>
-            <KeyRound className="h-4 w-4" /> 来源连接
+          <Button aria-label="可选增强" variant="outline" size="sm" onClick={() => openCookie()}>
+            <Cable className="h-4 w-4" /><span className="hidden sm:inline">可选增强</span>
           </Button>
-          <Button size="sm" onClick={() => void load(true)} disabled={loading}>
-            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} /> 刷新
+          <Button aria-label="刷新" size="sm" onClick={() => void load(true)} disabled={loading}>
+            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} /><span className="hidden sm:inline">刷新</span>
           </Button>
         </div>
       }
@@ -245,8 +267,10 @@ export default function HotspotsPage() {
           <Metric label="聚合条目" value={payload?.summary.totalItems ?? "—"} />
           <Metric label="在线来源" value={payload ? `${payload.summary.activeSources}/${payload.sourceHealth.length}` : "—"} tone={failures.length ? "amber" : "green"} />
           <Metric label="跨平台话题" value={payload?.summary.crossPlatformTopics ?? "—"} />
-          <Metric label="Cookie 来源" value={payload ? `${payload.summary.cookieConfiguredCount}/${payload.summary.cookieSourceCount}` : "—"} />
+          <Metric label="无需凭证" value={payload ? `${payload.summary.credentialFreeSourceCount}/${payload.sourceHealth.length}` : "—"} tone="green" />
         </section>
+
+        <XDiscoveryPanel />
 
         {failures.length ? (
           <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
@@ -341,7 +365,7 @@ export default function HotspotsPage() {
         </SheetContent>
       </Sheet>
 
-      <CookieSheet open={cookieOpen} onOpenChange={setCookieOpen} sources={payload?.sourceCatalog.filter((source) => source.requiresCookie) ?? []} selected={cookieSource} onSelect={(source) => { setCookieSource(source); setCookie(""); setUpstream(""); }} cookie={cookie} upstream={upstream} onCookie={setCookie} onUpstream={setUpstream} saving={cookieSaving} onSave={() => void saveCookie()} onClear={() => void saveCookie(true)} />
+      <CookieSheet open={cookieOpen} onOpenChange={setCookieOpen} sources={payload?.sourceCatalog.filter((source) => source.supportsOptionalConnection) ?? []} selected={cookieSource} onSelect={(source) => { setCookieSource(source); setCookie(""); setUpstream(""); }} cookie={cookie} upstream={upstream} onCookie={setCookie} onUpstream={setUpstream} saving={cookieSaving} onSave={() => void saveCookie()} onClear={() => void saveCookie(true)} />
     </AppShell>
   );
 }
@@ -382,14 +406,14 @@ function EvidencePanel({ topic }: { topic: HotspotTopic }) {
 }
 
 function SourceHealthList({ sources, onConfigure }: { sources: HotspotSourceHealth[]; onConfigure: (code: string) => void }) {
-  return <div><p className="mb-3 text-sm font-medium">来源状态</p><div className="space-y-2">{sources.map((source) => <button key={source.platformCode} type="button" onClick={() => source.requiresCookie && onConfigure(source.platformCode)} className="flex w-full items-center justify-between rounded-lg border p-3 text-left"><span><span className="block text-sm font-medium">{source.platform}</span><span className="block text-xs text-muted-foreground">{source.count} 条 · {source.backend}</span></span><span className={cn("h-2 w-2 rounded-full", source.ok ? "bg-emerald-600" : "bg-red-600")} /></button>)}</div></div>;
+  return <div><p className="mb-3 text-sm font-medium">来源状态</p><div className="space-y-2">{sources.map((source) => <button key={source.platformCode} type="button" onClick={() => source.supportsOptionalConnection && onConfigure(source.platformCode)} className="flex w-full items-center justify-between rounded-lg border p-3 text-left"><span><span className="block text-sm font-medium">{source.platform}</span><span className="block text-xs text-muted-foreground">{source.count} 条 · {source.backend}</span></span><span className={cn("h-2 w-2 rounded-full", source.ok ? "bg-emerald-600" : "bg-red-600")} /></button>)}</div></div>;
 }
 
 function CookieSheet(props: { open: boolean; onOpenChange: (open: boolean) => void; sources: HotspotSourceDefinition[]; selected: HotspotSourceDefinition | null; onSelect: (source: HotspotSourceDefinition) => void; cookie: string; upstream: string; onCookie: (value: string) => void; onUpstream: (value: string) => void; saving: boolean; onSave: () => void; onClear: () => void }) {
-  return <Sheet open={props.open} onOpenChange={props.onOpenChange}><SheetContent side="right" className="flex h-full w-full max-w-none flex-col p-0 sm:max-w-xl"><SheetHeader className="shrink-0 border-b bg-background px-6 py-5 pr-12 text-left"><SheetTitle className="flex items-center gap-2"><KeyRound className="h-4 w-4" />热点来源连接</SheetTitle><SheetDescription>本地开发保存到忽略提交的 JSON；生产环境必须使用用户级加密凭证。</SheetDescription></SheetHeader><div className="min-h-0 flex-1 overflow-y-auto px-6 py-5"><div className="mb-5 flex gap-2 overflow-x-auto pb-2">{props.sources.map((source) => <button key={source.code} type="button" onClick={() => props.onSelect(source)} className={cn("shrink-0 rounded-lg border px-3 py-2 text-xs", props.selected?.code === source.code ? "border-brand bg-brand text-white" : "bg-background")}>{source.label}{source.cookieConfigured ? <Check className="ml-2 inline h-3 w-3" /> : null}</button>)}</div>{props.selected ? <div className="space-y-5"><div className="grid grid-cols-2 gap-3"><ConnectionStatus label="Cookie" active={props.selected.cookieConfigured} /><ConnectionStatus label="本地覆盖" active={Boolean(props.selected.localCookieConfigured || props.selected.localUpstreamConfigured)} /></div><label className="block"><span className="mb-2 block text-sm font-medium">Cookie</span><Textarea value={props.cookie} onChange={(event) => props.onCookie(event.target.value)} className="min-h-32 font-mono text-xs" placeholder="name=value; name2=value2" autoComplete="off" /></label><label className="block"><span className="mb-2 block text-sm font-medium">自建上游地址（可选）</span><Input value={props.upstream} onChange={(event) => props.onUpstream(event.target.value)} placeholder="https://parser.example.com/hot-list" autoComplete="off" /></label>{props.selected.notes ? <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">{props.selected.notes}</p> : null}</div> : <p className="text-sm text-muted-foreground">没有需要 Cookie 的来源。</p>}</div><div className="flex shrink-0 gap-2 border-t bg-background px-6 py-4"><Button variant="outline" onClick={props.onClear} disabled={props.saving || !props.selected?.cookieConfigured}><Trash2 className="h-4 w-4" />清除</Button><Button className="ml-auto" onClick={props.onSave} disabled={props.saving || (!props.cookie.trim() && !props.upstream.trim())}>{props.saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}保存连接</Button></div></SheetContent></Sheet>;
+  return <Sheet open={props.open} onOpenChange={props.onOpenChange}><SheetContent side="right" className="flex h-full w-full max-w-none flex-col p-0 sm:max-w-xl"><SheetHeader className="shrink-0 border-b bg-background px-6 py-5 pr-12 text-left"><SheetTitle className="flex items-center gap-2"><Cable className="h-4 w-4" />可选来源增强</SheetTitle><SheetDescription>所有来源默认使用公开入口，无需登录。这里只在公开通道受限时配置自建上游或可选 Cookie。</SheetDescription></SheetHeader><div className="min-h-0 flex-1 overflow-y-auto px-6 py-5"><div className="mb-5 flex gap-2 overflow-x-auto pb-2">{props.sources.map((source) => <button key={source.code} type="button" onClick={() => props.onSelect(source)} className={cn("shrink-0 rounded-lg border px-3 py-2 text-xs", props.selected?.code === source.code ? "border-brand bg-brand text-white" : "bg-background")}>{source.label}{source.cookieConfigured ? <Check className="ml-2 inline h-3 w-3" /> : null}</button>)}</div>{props.selected ? <div className="space-y-5"><div className="grid grid-cols-2 gap-3"><ConnectionStatus label="公开获取" active /><ConnectionStatus label="自定义增强" active={props.selected.cookieConfigured} /></div><div className="rounded-lg border bg-muted/30 p-3 text-xs leading-5 text-muted-foreground">公开后端：{props.selected.publicBackends.join("、")}</div><label className="block"><span className="mb-2 block text-sm font-medium">站点 Cookie（可选）</span><Textarea value={props.cookie} onChange={(event) => props.onCookie(event.target.value)} className="min-h-32 font-mono text-xs" placeholder="仅在你有权使用自己的登录态时填写" autoComplete="off" /></label><label className="block"><span className="mb-2 block text-sm font-medium">自建上游地址（可选）</span><Input value={props.upstream} onChange={(event) => props.onUpstream(event.target.value)} placeholder="https://parser.example.com/hot-list" autoComplete="off" /></label>{props.selected.notes ? <p className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs leading-5 text-blue-950">{props.selected.notes}</p> : null}</div> : <p className="text-sm text-muted-foreground">当前没有可选增强来源。</p>}</div><div className="flex shrink-0 gap-2 border-t bg-background px-6 py-4"><Button variant="outline" onClick={props.onClear} disabled={props.saving || !props.selected?.cookieConfigured}><Trash2 className="h-4 w-4" />清除增强</Button><Button className="ml-auto" onClick={props.onSave} disabled={props.saving || (!props.cookie.trim() && !props.upstream.trim())}>{props.saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}保存增强</Button></div></SheetContent></Sheet>;
 }
 
-function ConnectionStatus({ label, active }: { label: string; active: boolean }) { return <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">{label}</p><p className={cn("mt-1 text-sm font-medium", active ? "text-emerald-700" : "text-amber-700")}>{active ? "已配置" : "待配置"}</p></div>; }
+function ConnectionStatus({ label, active }: { label: string; active: boolean }) { return <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">{label}</p><p className={cn("mt-1 text-sm font-medium", active ? "text-emerald-700" : "text-muted-foreground")}>{active ? (label === "公开获取" ? "无需配置" : "已配置") : "未配置"}</p></div>; }
 function TopicSkeleton() { return <div className="space-y-3">{[0, 1, 2, 3].map((item) => <div key={item} className="h-20 animate-pulse rounded-lg bg-muted" />)}</div>; }
 function LoadError({ message, onRetry }: { message: string; onRetry: () => void }) { return <div className="rounded-lg border border-red-200 bg-red-50 p-8 text-center"><CircleAlert className="mx-auto h-5 w-5 text-red-700" /><p className="mt-3 text-sm font-medium text-red-900">{message}</p><Button variant="outline" className="mt-4" onClick={onRetry}>重试</Button></div>; }
 function EmptyTopics() { return <div className="rounded-lg border border-dashed p-10 text-center"><p className="font-medium">当前筛选没有热点</p><p className="mt-1 text-sm text-muted-foreground">换个平台或刷新来源后再试。</p></div>; }

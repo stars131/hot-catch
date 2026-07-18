@@ -98,7 +98,7 @@ export function ReferenceCardView(props: {
     >
       <div className="flex items-start gap-2.5">
         {derivedState === "importing" ? (
-          <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#C83B32]" />
+          <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#66806D]" />
         ) : derivedState === "ready" ? (
           <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#4A7C59]" />
         ) : derivedState === "needs_input" ? (
@@ -154,7 +154,7 @@ export function ReferenceCardView(props: {
                 className={cn(
                   "rounded-lg",
                   action.appearance === "primary" &&
-                    "bg-[#C83B32] text-[#FFFDF9] hover:bg-[#B3352D]",
+                    "bg-[#355642] text-white hover:bg-[#294836]",
                   action.appearance === "ghost" && "border-transparent",
                 )}
                 disabled={(done && action.repeatable !== true) || busy}

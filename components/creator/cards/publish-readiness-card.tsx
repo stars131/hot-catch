@@ -93,7 +93,7 @@ export function PublishReadinessCardView(props: {
       data-confirmed={confirmed ? "true" : "false"}
     >
       <div className="flex items-start gap-2.5">
-        <Send className="mt-0.5 h-4 w-4 shrink-0 text-[#C83B32]" aria-hidden />
+        <Send className="mt-0.5 h-4 w-4 shrink-0 text-[#476451]" aria-hidden />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-medium">发布就绪检查</p>
@@ -181,7 +181,7 @@ export function PublishReadinessCardView(props: {
               className={cn(
                 "rounded-lg",
                 action.appearance === "primary"
-                  ? "bg-[#C83B32] text-[#FFFDF9] hover:bg-[#B3352D]"
+                  ? "bg-[#355642] text-white hover:bg-[#294836]"
                   : action.appearance === "ghost"
                     ? "border-transparent text-[#67625A]"
                     : "border-[#DDD7CE]",

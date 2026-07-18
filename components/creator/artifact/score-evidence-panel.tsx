@@ -36,7 +36,7 @@ export function ScoreEvidencePanel(props: {
 
   return (
     <div className="space-y-4 px-3.5 py-4">
-      <section className="rounded-xl border border-[#E7E5E0] bg-[#FFFDF9] p-3.5">
+      <section className="rounded-lg border border-[#E7E5E0] bg-[#FFFDF9] p-3.5">
         <div className="flex items-center gap-2">
           <p className="flex-1 text-xs font-medium text-[#67625A]">发布前评分</p>
           <Button
@@ -102,7 +102,40 @@ export function ScoreEvidencePanel(props: {
         )}
       </section>
 
-      <section className="rounded-xl border border-[#E7E5E0] bg-[#FFFDF9] p-3.5">
+      <section className="rounded-lg border border-[#E7E5E0] bg-[#FFFDF9] p-3.5">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-medium text-[#67625A]">表达方向审查</p>
+          {props.content.directionReview ? (
+            <span className={props.content.directionReview.status === "passed"
+              ? "rounded bg-[#E8F1EA] px-2 py-1 text-[10px] font-medium text-[#42664B]"
+              : "rounded bg-[#FFF1D8] px-2 py-1 text-[10px] font-medium text-[#875A16]"}
+            >
+              {props.content.directionReview.status === "passed" ? "通过" : props.content.directionReview.status === "unavailable" ? "暂不可用" : "需关注"}
+              {props.content.directionReview.score === undefined ? "" : ` · ${props.content.directionReview.score}`}
+            </span>
+          ) : null}
+        </div>
+        {props.content.directionReview ? (
+          <div className="mt-2">
+            <p className="text-sm font-medium text-[#292620]">
+              {props.content.directionReview.primaryLabel}
+              {props.content.directionReview.secondaryLabel ? ` + ${props.content.directionReview.secondaryLabel}` : ""}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-[#746F67]">{props.content.directionReview.summary}</p>
+            {props.content.directionReview.suggestions.length ? (
+              <ul className="mt-2 space-y-1 text-xs leading-5 text-[#875A16]">
+                {props.content.directionReview.suggestions.map((suggestion, index) => (
+                  <li key={`${index}-${suggestion}`}>{index + 1}. {suggestion}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : (
+          <p className="mt-2 text-sm text-[#746F67]">当前版本还没有方向审查结果；重新评分会同时检查表达方向。</p>
+        )}
+      </section>
+
+      <section className="rounded-lg border border-[#E7E5E0] bg-[#FFFDF9] p-3.5">
         <p className="text-xs font-medium text-[#67625A]">参考证据</p>
         {props.content.references.length === 0 ? (
           <p className="mt-2 text-sm text-[#746F67]">

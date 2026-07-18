@@ -13,6 +13,12 @@ import {
   type ReadinessAssessment,
   type ReadinessItem,
 } from "@/lib/creator/publish-readiness";
+import {
+  directionReviewCard,
+  directionReviewReadinessItem,
+  reviewContentDirection,
+  type DirectionReviewResult,
+} from "@/lib/services/content-direction-review-service";
 
 /**
  * C8 发布确认与移交(服务端装配)。
@@ -96,12 +102,18 @@ async function loadContentWithLatestRevision(userId: string, contentId: string) 
 async function collectReadiness(params: {
   userId: string;
   contentId: string;
+  revisionId: string;
   contentKind: "xhs_graphic" | "douyin_video_script";
   title: string | null;
   bodyText: string | null;
   structuredContent: unknown;
   fallbackTags: string[];
-}): Promise<{ assessment: ReadinessAssessment; connection: ConnectionState; items: ReadinessItem[] }> {
+}): Promise<{
+  assessment: ReadinessAssessment;
+  connection: ConnectionState;
+  items: ReadinessItem[];
+  directionReview: DirectionReviewResult | null;
+}> {
   const structured =
     params.structuredContent &&
     typeof params.structuredContent === "object" &&
@@ -117,6 +129,13 @@ async function collectReadiness(params: {
   });
   const connection = await getAiToEarnConnectionState(params.userId);
   const items: ReadinessItem[] = [...assessment.items, connectionItem(connection)];
+  const directionReview = await reviewContentDirection({
+    userId: params.userId,
+    contentId: params.contentId,
+    revisionId: params.revisionId,
+    stage: "publish",
+  });
+  if (directionReview) items.push(directionReviewReadinessItem(directionReview));
 
   const inFlight = await prisma.publishRecord.findFirst({
     where: {
@@ -135,7 +154,7 @@ async function collectReadiness(params: {
       detail: `这条内容已有一条「${PUBLISH_STATUS_LABEL[inFlight.status] ?? inFlight.status}」的发布记录(${inFlight.createdAt.toLocaleString("zh-CN")});重复提交可能造成重复发布,请先到发布中心处理。`,
     });
   }
-  return { assessment, connection, items };
+  return { assessment, connection, items, directionReview };
 }
 
 function readinessActions(params: {
@@ -218,9 +237,10 @@ export async function buildPublishReadinessReply(params: {
     };
   }
 
-  const { connection, items } = await collectReadiness({
+  const { connection, items, directionReview } = await collectReadiness({
     userId: params.userId,
     contentId: content.id,
+    revisionId: latest.id,
     contentKind: content.contentKind as "xhs_graphic" | "douyin_video_script",
     title: latest.title,
     bodyText: latest.bodyText,
@@ -263,7 +283,7 @@ export async function buildPublishReadinessReply(params: {
         : "各项检查已通过。";
   return {
     text: `「${title}」v${latest.revisionNumber} 的发布就绪检查(${readinessStateLabel(state)}):${summary}移交后仍需你在发布中心上传素材并手动确认;当前阶段未接入真实供应商,系统不会自动发布。`,
-    cards: [card],
+    cards: [...(directionReview ? [directionReviewCard(directionReview)] : []), card],
     command: "publish.prepare",
   };
 }
@@ -320,6 +340,7 @@ export async function confirmPublishHandoff(params: {
   const { connection, items } = await collectReadiness({
     userId: params.userId,
     contentId: content.id,
+    revisionId: latest.id,
     contentKind: content.contentKind as "xhs_graphic" | "douyin_video_script",
     title: latest.title,
     bodyText: latest.bodyText,

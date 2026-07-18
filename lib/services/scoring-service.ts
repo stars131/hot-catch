@@ -6,6 +6,7 @@ import {
   scoreContent,
   type ScoredContentKind,
 } from "@/lib/scoring/score";
+import { reviewContentDirection } from "@/lib/services/content-direction-review-service";
 
 export async function ensureActiveRubric(
   userId: string,
@@ -67,5 +68,17 @@ export async function scoreContentProject(userId: string, contentId: string) {
       scoreSnapshot: score as unknown as Prisma.InputJsonValue,
     },
   });
-  return { score, rubric: { id: rubric.id, name: rubric.name, version: rubric.version } };
+  const directionReview = latest
+    ? await reviewContentDirection({
+        userId,
+        contentId: content.id,
+        revisionId: latest.id,
+        stage: "generation",
+      })
+    : null;
+  return {
+    score,
+    rubric: { id: rubric.id, name: rubric.name, version: rubric.version },
+    directionReview,
+  };
 }

@@ -73,6 +73,8 @@ npm run worker
 
 ## 3. 供应商凭证就绪检查表（真实内测前逐项打勾）
 
+X 专项检索与限量邀请码的配置、创建命令及真实验收边界见 `docs/x-discovery-and-beta-invites.md`。
+
 所有凭证均由**每位用户**在 `/settings/connections` 自助保存，AES-256-GCM 密文落库，接口只返回状态 + 尾号提示。环境变量里不放用户级 Key。
 
 | # | 供应商 | 用途 | 就绪动作 | 验收标准（当前状态） |

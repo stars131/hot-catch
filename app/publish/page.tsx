@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { BarChart3, CalendarClock, Check, CircleAlert, ExternalLink, FileUp, FlaskConical, Loader2, PlugZap, RefreshCw, RotateCcw, Send, X } from "lucide-react";
@@ -24,6 +25,14 @@ type Upload = { name: string; type: "image" | "video"; url: string; size: number
 type RecordStatus = "draft" | "scheduled" | "uploading" | "submitted" | "awaiting_user" | "published" | "failed" | "canceled";
 type PublishRecord = { id: string; contentId: string; platform: PublishPlatform; status: RecordStatus; providerAccountId: string; scheduledAt: string | null; submittedAt: string | null; publishedAt: string | null; shortLink: string | null; publicUrl: string | null; failureCode: string | null; failureReason: string | null; attemptCount: number; lastSyncedAt: string | null; createdAt: string; content?: { title: string | null } };
 type Signature = { assetId: string; uploadUrl: string; method: "PUT" | "POST"; fields?: Record<string, string>; headers?: Record<string, string>; assetUrl?: string; simulated?: boolean };
+type PublishLoadData = {
+  contents: Content[];
+  accounts: Account[];
+  accountsUnavailable: boolean;
+  connection: "connected" | "invalid" | "not_configured" | null;
+  records: PublishRecord[];
+  providerMode: "mock" | "real" | null;
+};
 
 const FINAL_STATUSES = new Set<RecordStatus>(["published", "failed", "canceled"]);
 
@@ -62,38 +71,60 @@ function PublishWorkspace() {
   const [handoffBannerOpen, setHandoffBannerOpen] = useState(true);
   const [handoffMissing, setHandoffMissing] = useState(false);
   const idempotencyKey = useRef(crypto.randomUUID());
+  const queryClient = useQueryClient();
 
-  const load = useCallback(async () => {
+  const applyLoadData = useCallback((data: PublishLoadData) => {
+    const allReady = data.contents.filter((content) => content._count.revisions > 0);
+    const ready = allReady.filter(
+      (content) => content.platform === "xiaohongshu" || content.platform === "douyin",
+    );
+    setContents(ready);
+    setExportOnlyContents(allReady.filter((content) => GLOBAL_PLATFORM_IDS.includes(content.platform)));
+    setAccounts(data.accounts);
+    setConnection(data.connection);
+    setAccountsUnavailable(data.accountsUnavailable);
+    setRecords(data.records);
+    setProviderMode(data.providerMode);
+    const handoffReady = handoffContentId
+      ? ready.some((content) => content.id === handoffContentId)
+      : false;
+    setHandoffMissing(Boolean(handoffContentId) && !handoffReady);
+    setContentId((current) => current || (handoffReady ? handoffContentId! : ready[0]?.id || ""));
+  }, [handoffContentId]);
+
+  const load = useCallback(async (force = false) => {
+    const queryKey = ["workspace", "publish"] as const;
+    const cached = queryClient.getQueryData<PublishLoadData>(queryKey);
+    if (cached) {
+      applyLoadData(cached);
+      setLoading(false);
+    }
     try {
-      let accountsFailed = false;
-      const [contentData, statusData, accountData, recordData] = await Promise.all([
-        readApiJson<{ contents: Content[] }>(await fetch("/api/content/list", { cache: "no-store" })),
-        readApiJson<{ connection: "connected" | "invalid" | "not_configured" }>(await fetch("/api/integrations/aitoearn/status", { cache: "no-store" })).catch(() => null),
-        readApiJson<{ accounts: Account[] }>(await fetch("/api/integrations/aitoearn/accounts", { cache: "no-store" })).catch(() => { accountsFailed = true; return { accounts: [] as Account[] }; }),
-        readApiJson<{ records: PublishRecord[]; providerMode?: "mock" | "real" }>(await fetch("/api/publish/records", { cache: "no-store" })),
-      ]);
-      const allReady = contentData.contents.filter((content) => content._count.revisions > 0);
-      const ready = allReady.filter(
-        (content) => content.platform === "xiaohongshu" || content.platform === "douyin",
-      );
-      setContents(ready);
-      setExportOnlyContents(
-        allReady.filter((content) => GLOBAL_PLATFORM_IDS.includes(content.platform)),
-      );
-      setAccounts(accountData.accounts);
-      setConnection(statusData?.connection ?? null);
-      setAccountsUnavailable(accountsFailed);
-      setRecords(recordData.records);
-      setProviderMode(recordData.providerMode ?? null);
-      // 创作移交的内容优先预选;不存在或没有版本时给出安全提示,不伪造数据
-      const handoffReady = handoffContentId
-        ? ready.some((content) => content.id === handoffContentId)
-        : false;
-      setHandoffMissing(Boolean(handoffContentId) && !handoffReady);
-      setContentId((current) => current || (handoffReady ? handoffContentId! : ready[0]?.id || ""));
+      const data = await queryClient.fetchQuery({
+        queryKey,
+        staleTime: force ? 0 : 2 * 60 * 1000,
+        queryFn: async (): Promise<PublishLoadData> => {
+          let accountsFailed = false;
+          const [contentData, statusData, accountData, recordData] = await Promise.all([
+            readApiJson<{ contents: Content[] }>(await fetch("/api/content/list", { cache: "no-store" })),
+            readApiJson<{ connection: "connected" | "invalid" | "not_configured" }>(await fetch("/api/integrations/aitoearn/status", { cache: "no-store" })).catch(() => null),
+            readApiJson<{ accounts: Account[] }>(await fetch("/api/integrations/aitoearn/accounts", { cache: "no-store" })).catch(() => { accountsFailed = true; return { accounts: [] as Account[] }; }),
+            readApiJson<{ records: PublishRecord[]; providerMode?: "mock" | "real" }>(await fetch("/api/publish/records", { cache: "no-store" })),
+          ]);
+          return {
+            contents: contentData.contents,
+            accounts: accountData.accounts,
+            accountsUnavailable: accountsFailed,
+            connection: statusData?.connection ?? null,
+            records: recordData.records,
+            providerMode: recordData.providerMode ?? null,
+          };
+        },
+      });
+      applyLoadData(data);
     } catch { toast.error(t("loadFailed")); }
     finally { setLoading(false); }
-  }, [handoffContentId, t]);
+  }, [applyLoadData, queryClient, t]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -160,7 +191,7 @@ function PublishWorkspace() {
       if (data.record) setRecords((current) => [data.record!, ...current.filter((item) => item.id !== data.record!.id)]);
       idempotencyKey.current = crypto.randomUUID();
       toast.success(data.providerMode === "mock" ? t("mockSubmitted") : scheduledAt ? t("scheduledCreated") : t("submitted"));
-      await load();
+      await load(true);
     } catch { toast.error(t("submitFailed")); }
     finally { setSubmitting(false); }
   }
@@ -171,13 +202,13 @@ function PublishWorkspace() {
       await readApiJson(await fetch(`/api/publish/records/${record.id}/${mode}`, { method: "POST" }));
       if (mode === "retry") setActiveRecordId(record.id);
       toast.success(mode === "retry" ? t("requeued") : t("canceledToast"));
-      await load();
+      await load(true);
     } catch { toast.error(t("actionFailed")); }
     finally { setSyncingId(null); }
   }
 
   return (
-    <AppShell title={t("title")} description={t("description")} actions={<Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw className="h-4 w-4" />{t("refreshAccounts")}</Button>}>
+    <AppShell title={t("title")} description={t("description")} actions={<Button variant="outline" size="sm" onClick={() => void load(true)}><RefreshCw className="h-4 w-4" />{t("refreshAccounts")}</Button>}>
       {exportOnlyContents.length ? (
         <Card className="mb-5 border-violet-200 bg-violet-50/60" data-testid="foreign-export-only">
           <CardHeader className="pb-3">

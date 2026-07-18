@@ -28,6 +28,8 @@
     "retrospectives": "Performance review",
     "connections": "Connections",
     "skills": "Skill settings",
+    "personas": "Account personas",
+    "tasks": "Task center",
     "shortCreator": "Create",
     "shortHotspots": "Trends",
     "shortIdeas": "Ideas",
@@ -47,9 +49,11 @@
   "SignIn": {
     "eyebrow": "STARTRACE / INVITED BETA",
     "title": "Sign in to Startrace",
-    "description": "Startrace is currently invite-only. Enter an invited email address and we’ll send a one-time sign-in link.",
-    "error": "Sign-in could not be completed. Confirm that the email is invited and the invitation is still valid.",
-    "email": "Invited email",
+    "description": "Startrace is in a limited invite-only beta. Enter your email and invite code for a one-time sign-in link. Returning users only need their email.",
+    "error": "Sign-in could not be completed. Check the email, invite code, and remaining capacity, or confirm that this email is already registered.",
+    "email": "Email",
+    "inviteCode": "Invite code",
+    "inviteCodeHelp": "Required for first registration; optional for returning or directly invited users.",
     "submit": "Send sign-in link",
     "development": "Use local development account"
   },
@@ -255,6 +259,7 @@
       "deepseek": "DeepSeek content generation",
       "tikhub": "Public or authorized Xiaohongshu and Douyin account, post and metric parsing",
       "youtube_data": "Sync public metrics for historical videos with your own YouTube Data API key",
+        "x_api": "Optional official X API priority; public OSINT works without credentials",
       "qwen_asr": "Douyin video speech transcription",
       "aitoearn": "Account authorization, asset upload, publishing and record retrieval",
       "firecrawl": "Optional import for ordinary public web pages"

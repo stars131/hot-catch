@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { FileText } from "lucide-react";
+import { FileText, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { CreatorShell } from "@/components/creator/creator-shell";
@@ -29,6 +30,7 @@ import type {
 import type { PatchTarget } from "@/lib/creator/chat-schemas";
 import type { SkillCatalogItem } from "@/lib/skills/catalog";
 import { missingItemsPrompt } from "@/lib/creator/publish-readiness";
+import { useConversationEvents } from "@/hooks/creator/use-conversation-events";
 import {
   actionKeyOf,
   cancelRun,
@@ -41,6 +43,8 @@ import {
   sendMessage,
   type ActiveRun,
   type ConversationSummary,
+  type ConversationCheckpoint,
+  type RunTrace,
   type ThreadMessage,
 } from "@/lib/creator/conversation-client";
 
@@ -111,6 +115,8 @@ export function CreatorAgentWorkspace({
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
   const [processedKeys, setProcessedKeys] = useState<string[]>([]);
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null);
+  const [runTraces, setRunTraces] = useState<RunTrace[]>([]);
+  const [checkpoints, setCheckpoints] = useState<ConversationCheckpoint[]>([]);
   const [threadState, setThreadState] = useState<"empty" | "loading" | "ready" | "error">(
     conversationId ? "loading" : "empty",
   );
@@ -120,9 +126,11 @@ export function CreatorAgentWorkspace({
   const [chips, setChips] = useState<ComposerContextChip[]>([]);
   const [skills, setSkills] = useState<SkillCatalogItem[]>([]);
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
+  const [contextUsage, setContextUsage] = useState<{ ratio: number; tokens: number; contextWindow: number; checkpointCount: number } | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [artifactContentId, setArtifactContentId] = useState<string | null>(null);
+  const [openArtifacts, setOpenArtifacts] = useState<Array<{ id: string; title: string }>>([]);
   const [lastArtifactContentId, setLastArtifactContentId] = useState<string | null>(null);
   /** 选中区块修改目标:发送消息时随 context 提交,服务端生成补丁提案卡 */
   const [patchTarget, setPatchTarget] = useState<(PatchTarget & { label: string }) | null>(
@@ -139,28 +147,44 @@ export function CreatorAgentWorkspace({
   const seenArtifactCardIdsRef = useRef<Set<string> | null>(null);
   const localEchoRef = useRef(0);
   const busyRef = useRef(false);
+  const queryClient = useQueryClient();
 
-  const refreshList = useCallback(async () => {
+  const refreshList = useCallback(async (force = false) => {
+    const queryKey = ["workspace", "creator", "conversations"] as const;
+    const cached = queryClient.getQueryData<ConversationSummary[]>(queryKey);
+    if (cached) {
+      setConversations(cached);
+      setListLoading(false);
+    }
     try {
-      setConversations(await listConversations());
+      const next = await queryClient.fetchQuery({
+        queryKey,
+        queryFn: listConversations,
+        staleTime: force ? 0 : 60 * 1000,
+      });
+      setConversations(next);
     } catch {
       // 列表加载失败不阻塞主流程;侧栏显示空态。
     } finally {
       setListLoading(false);
     }
-  }, []);
+  }, [queryClient]);
 
   useEffect(() => {
     void refreshList();
   }, [refreshList]);
 
   useEffect(() => {
-    listSkills()
-      .then(setSkills)
+    queryClient.fetchQuery({
+      queryKey: ["workspace", "skills"],
+      queryFn: async () => ({ skills: await listSkills() }),
+      staleTime: 5 * 60 * 1000,
+    })
+      .then((data) => setSkills(data.skills))
       .catch((error: unknown) =>
         toast.error(error instanceof Error ? error.message : "Skill 列表加载失败"),
       );
-  }, []);
+  }, [queryClient]);
 
   useEffect(() => {
     if (!prefill || conversationId) return;
@@ -168,8 +192,15 @@ export function CreatorAgentWorkspace({
   }, [conversationId, prefill]);
 
   const reloadMessages = useCallback(
-    async (id: string) => {
-      const data = await listMessages(id);
+    async (id: string, force = false) => {
+      const queryKey = ["workspace", "creator", "messages", id] as const;
+      const cached = queryClient.getQueryData<Awaited<ReturnType<typeof listMessages>>>(queryKey);
+      const data = cached ?? await queryClient.fetchQuery({
+        queryKey,
+        queryFn: () => listMessages(id),
+        staleTime: force ? 0 : 15 * 1000,
+      });
+      if (!data) throw new Error("会话状态读取失败");
       // 服务端为真相源;仅保留尚未持久化的本地回显(失败提示等),避免覆盖
       setMessages((previous) => {
         const locals = previous.filter((message) => message.id.startsWith("local-"));
@@ -177,11 +208,34 @@ export function CreatorAgentWorkspace({
       });
       setProcessedKeys(data.processedActionKeys);
       setActiveRun(data.activeRun);
+      setRunTraces(data.runTraces);
+      setCheckpoints(data.checkpoints);
       setSelectedSkillIds(data.activeSkillIds);
+      if (cached && force) {
+        const fresh = await queryClient.fetchQuery({
+          queryKey,
+          queryFn: () => listMessages(id),
+          staleTime: 0,
+        });
+        setMessages((previous) => [
+          ...fresh.messages,
+          ...previous.filter((message) => message.id.startsWith("local-")),
+        ]);
+        setProcessedKeys(fresh.processedActionKeys);
+        setActiveRun(fresh.activeRun);
+        setRunTraces(fresh.runTraces);
+        setCheckpoints(fresh.checkpoints);
+        setSelectedSkillIds(fresh.activeSkillIds);
+        return fresh;
+      }
       return data;
     },
-    [],
+    [queryClient],
   );
+
+  useConversationEvents(conversationId, () => {
+    if (conversationId) void reloadMessages(conversationId, true);
+  });
 
   // 切换会话时关闭 Artifact 面板,重置自动打开记录与修改目标
   useEffect(() => {
@@ -220,6 +274,8 @@ export function CreatorAgentWorkspace({
       setMessages([]);
       setProcessedKeys([]);
       setActiveRun(null);
+      setRunTraces([]);
+      setCheckpoints([]);
       setSelectedSkillIds([]);
       setThreadState("empty");
       setThreadError(undefined);
@@ -245,6 +301,18 @@ export function CreatorAgentWorkspace({
 
   // /ideas 带入的内容项目 -> 上下文 Chip
   useEffect(() => {
+    if (!conversationId) {
+      setContextUsage(null);
+      return;
+    }
+    fetch(`/api/conversations/${conversationId}/context`, { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then(setContextUsage)
+      .catch(() => setContextUsage(null));
+  }, [conversationId, messages.length]);
+
+  // /ideas 带入的内容项目 -> 上下文 Chip
+  useEffect(() => {
     let cancelled = false;
     if (!contentId) {
       setChips((current) => current.filter((chip) => chip.kind !== "content"));
@@ -254,7 +322,7 @@ export function CreatorAgentWorkspace({
       .then((content) => {
         if (cancelled) return;
         setChips([
-          { id: content.id, kind: "content", label: content.title || "未命名项目" },
+          { id: content.id, kind: "content", label: content.title || "未命名项目", entityType: "content" },
         ]);
       })
       .catch(() => {
@@ -325,6 +393,9 @@ export function CreatorAgentWorkspace({
           : undefined;
         const result = await sendMessage(activeId, text, {
           skillIds: selectedSkillIds,
+          entityRefs: chips.flatMap((chip) =>
+            chip.entityType ? [{ type: chip.entityType, id: chip.id }] : [],
+          ),
           patchTarget: target,
           publishTarget: options?.publishTarget,
         });
@@ -334,7 +405,7 @@ export function CreatorAgentWorkspace({
           result.userMessage,
           result.assistantMessage,
         ]);
-        void refreshList();
+        void refreshList(true);
         return true;
       } catch (error) {
         setMessages((current) => [
@@ -364,6 +435,7 @@ export function CreatorAgentWorkspace({
       router,
       searchParams,
       selectedSkillIds,
+      chips,
     ],
   );
 
@@ -390,7 +462,7 @@ export function CreatorAgentWorkspace({
       if (clientKey) next.add(clientKey);
       return [...next];
     });
-    await reloadMessages(conversationId);
+    await reloadMessages(conversationId, true);
   };
 
   function handleRetry(message: ThreadMessage) {
@@ -403,7 +475,7 @@ export function CreatorAgentWorkspace({
     try {
       await cancelRun(runId);
     } finally {
-      if (conversationId) void reloadMessages(conversationId);
+      if (conversationId) void reloadMessages(conversationId, true);
     }
   }
 
@@ -426,6 +498,9 @@ export function CreatorAgentWorkspace({
 
   function handleArtifactOpen(card: ArtifactCard) {
     setArtifactContentId(card.contentId);
+    setOpenArtifacts((current) => current.some((item) => item.id === card.contentId)
+      ? current
+      : [...current, { id: card.contentId, title: card.title }]);
     setLastArtifactContentId(card.contentId);
     setChecklistRequest(null);
     seenArtifactCardIdsRef.current?.add(card.id);
@@ -475,6 +550,9 @@ export function CreatorAgentWorkspace({
   /** 补丁卡「复制到编辑器」:打开对应作品并把提案写入草稿(客户端本地)。 */
   function handlePatchCopyToEditor(card: PatchCard) {
     setArtifactContentId(card.contentId);
+    setOpenArtifacts((current) => current.some((item) => item.id === card.contentId)
+      ? current
+      : [...current, { id: card.contentId, title: card.sectionLabel }]);
     setLastArtifactContentId(card.contentId);
     setChecklistRequest(null);
     setPendingInsert({
@@ -522,6 +600,9 @@ export function CreatorAgentWorkspace({
   /** 就绪卡「打开检查清单」:打开对应作品的 Artifact 面板并展开清单。 */
   function handleOpenPublishChecklist(card: PublishReadinessCard) {
     setArtifactContentId(card.contentId);
+    setOpenArtifacts((current) => current.some((item) => item.id === card.contentId)
+      ? current
+      : [...current, { id: card.contentId, title: card.title }]);
     setLastArtifactContentId(card.contentId);
     setChecklistRequest({ contentId: card.contentId, nonce: ++checklistNonceRef.current });
   }
@@ -550,7 +631,7 @@ export function CreatorAgentWorkspace({
   }
 
   const handleJobSettled = useCallback(() => {
-    if (conversationId) void reloadMessages(conversationId);
+    if (conversationId) void reloadMessages(conversationId, true);
   }, [conversationId, reloadMessages]);
 
   function handleStartNew() {
@@ -616,6 +697,7 @@ export function CreatorAgentWorkspace({
           busy={busy}
           skills={skills}
           selectedSkillIds={selectedSkillIds}
+          contextUsage={contextUsage}
           chips={
             patchTarget
               ? [...chips, { id: "patch-target", kind: "patch" as const, label: patchTarget.label }]
@@ -625,6 +707,11 @@ export function CreatorAgentWorkspace({
           onSend={() => void handleSend()}
           onPickSkill={handlePickSkill}
           onToggleSkill={handleToggleSkill}
+          onAddMention={(item) => setChips((current) =>
+            current.some((chip) => chip.id === item.id && chip.kind === item.kind)
+              ? current
+              : [...current, item],
+          )}
           onRemoveChip={(id) => {
             if (id === "patch-target") {
               setPatchTarget(null);
@@ -645,21 +732,53 @@ export function CreatorAgentWorkspace({
       onDrawerOpenChange={setDrawerOpen}
       artifact={
         artifactContentId ? (
-          <ArtifactPanel
-            contentId={artifactContentId}
-            onClose={() => {
-              setArtifactContentId(null);
-              setChecklistRequest(null);
-            }}
-            onAskRefine={handleArtifactAskRefine}
-            pendingInsert={pendingInsert}
-            onPublishPrepare={handlePublishPrepare}
-            openChecklistNonce={
-              checklistRequest && checklistRequest.contentId === artifactContentId
-                ? checklistRequest.nonce
-                : 0
-            }
-          />
+          <div className="flex min-h-0 h-full flex-col bg-background">
+            <div className="flex h-10 shrink-0 items-end gap-1 overflow-x-auto border-b px-2">
+              {openArtifacts.map((artifact) => (
+                <div key={artifact.id} className="flex max-w-48 items-center rounded-t-md border border-b-0 bg-card">
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 truncate px-3 py-2 text-left text-xs"
+                    aria-current={artifact.id === artifactContentId ? "page" : undefined}
+                    onClick={() => setArtifactContentId(artifact.id)}
+                  >
+                    {artifact.title}
+                  </button>
+                  <button
+                    type="button"
+                    className="p-2 text-muted-foreground hover:text-foreground"
+                    aria-label={`关闭 ${artifact.title}`}
+                    onClick={() => {
+                      const remaining = openArtifacts.filter((item) => item.id !== artifact.id);
+                      setOpenArtifacts(remaining);
+                      if (artifact.id === artifactContentId) {
+                        setArtifactContentId(remaining.at(-1)?.id ?? null);
+                      }
+                    }}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="min-h-0 flex-1">
+              <ArtifactPanel
+                contentId={artifactContentId}
+                onClose={() => {
+                  setArtifactContentId(null);
+                  setChecklistRequest(null);
+                }}
+                onAskRefine={handleArtifactAskRefine}
+                pendingInsert={pendingInsert}
+                onPublishPrepare={handlePublishPrepare}
+                openChecklistNonce={
+                  checklistRequest && checklistRequest.contentId === artifactContentId
+                    ? checklistRequest.nonce
+                    : 0
+                }
+              />
+            </div>
+          </div>
         ) : undefined
       }
     >
@@ -670,6 +789,8 @@ export function CreatorAgentWorkspace({
         busy={busy}
         processedKeys={processedKeys}
         activeRun={activeRun}
+        runTraces={runTraces}
+        checkpoints={checkpoints}
         quickEntries={quickEntriesFor(platform)}
         onQuickEntry={handleQuickEntry}
         onStartNew={handleStartNew}

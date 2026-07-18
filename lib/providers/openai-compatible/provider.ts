@@ -1,4 +1,4 @@
-import type { ZodType } from "zod";
+import type { ZodIssue, ZodType } from "zod";
 import { env } from "@/lib/env";
 import { AppError } from "@/lib/errors";
 import { safeParseJson } from "@/lib/ai/generate";
@@ -20,6 +20,26 @@ type ProviderOptions = {
 
 /** 上游响应正文读取上限:防止恶意/异常端点返回超大 body 拖垮 Worker。 */
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+const MAX_DIAGNOSTIC_OUTPUT_CHARS = 50_000;
+
+type StructuredValidationIssue = {
+  path: string;
+  code: string;
+  message: string;
+  expected?: string;
+  received?: string;
+  minimum?: number;
+  maximum?: number;
+  actual?: number | string | boolean | null;
+  unit?: string;
+};
+
+type StructuredAttemptDiagnostic = {
+  attempt: "initial" | "repair";
+  issues: StructuredValidationIssue[];
+  rawOutput: string;
+  truncated: boolean;
+};
 
 export class OpenAiCompatibleProvider implements LlmProvider {
   readonly name: LlmProviderId;
@@ -53,26 +73,31 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     temperature?: number;
   }): Promise<T> {
     const first = await this.request(input, true);
-    const firstResult = input.schema.safeParse(safeParseJson(first));
+    const firstResult = validateStructuredOutput(input.schema, first, "initial");
     if (firstResult.success) return firstResult.data;
 
     const repaired = await this.request(
       {
         system: `${input.system}\n你正在修复结构化输出。只返回完整 JSON，不解释。`,
-        prompt: `原始输出：\n${first}\n\n校验错误：\n${JSON.stringify(
-          firstResult.error.flatten(),
-        )}\n\n请按要求修复一次。`,
+        prompt: `原始输出：\n${firstResult.diagnostic.rawOutput}\n\n字段级校验错误：\n${JSON.stringify(
+          firstResult.diagnostic.issues,
+          null,
+          2,
+        )}\n\n请逐项修复，保留原稿有效内容，并按系统消息中的 JSON 示例返回完整对象。`,
         temperature: 0.1,
       },
       true,
     );
-    const repairedResult = input.schema.safeParse(safeParseJson(repaired));
+    const repairedResult = validateStructuredOutput(input.schema, repaired, "repair");
     if (repairedResult.success) return repairedResult.data;
     throw new AppError(
       "AI_GENERATION_FAILED",
       "模型输出连续两次未通过结构校验，已转入人工处理。",
       422,
-      repairedResult.error.flatten(),
+      {
+        kind: "structured_output_invalid",
+        attempts: [firstResult.diagnostic, repairedResult.diagnostic],
+      },
     );
   }
 
@@ -175,7 +200,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
         if (done) break;
         received += value.byteLength;
         if (received > MAX_RESPONSE_BYTES) {
-          void reader.cancel();
+          await cancelReaderQuietly(reader);
           throw new AppError(
             "AI_GENERATION_FAILED",
             `${this.displayName} 返回内容过大,已终止读取。`,
@@ -186,7 +211,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
       }
     } catch (error) {
       if (error instanceof AppError) throw error;
-      void reader.cancel();
+      await cancelReaderQuietly(reader);
       throw error;
     }
     return Buffer.concat(chunks).toString("utf8");
@@ -195,4 +220,102 @@ export class OpenAiCompatibleProvider implements LlmProvider {
   private supportsTemperature() {
     return !(this.name === "openai" && this.model.startsWith("gpt-5"));
   }
+}
+
+async function cancelReaderQuietly(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+) {
+  try {
+    await reader.cancel();
+  } catch {
+    // The original read/timeout error remains the actionable failure.
+  }
+}
+
+function validateStructuredOutput<T>(
+  schema: ZodType<T>,
+  rawOutput: string,
+  attempt: StructuredAttemptDiagnostic["attempt"],
+):
+  | { success: true; data: T }
+  | { success: false; diagnostic: StructuredAttemptDiagnostic } {
+  const output = truncateDiagnosticOutput(rawOutput);
+  let parsed: unknown;
+  try {
+    parsed = safeParseJson<unknown>(rawOutput);
+  } catch {
+    return {
+      success: false,
+      diagnostic: {
+        attempt,
+        rawOutput: output.value,
+        truncated: output.truncated,
+        issues: [{
+          path: "$",
+          code: "invalid_json",
+          message: "模型返回的内容不是有效 JSON。",
+        }],
+      },
+    };
+  }
+
+  const result = schema.safeParse(parsed);
+  if (result.success) return { success: true, data: result.data };
+  return {
+    success: false,
+    diagnostic: {
+      attempt,
+      rawOutput: output.value,
+      truncated: output.truncated,
+      issues: result.error.issues.slice(0, 50).map((issue) =>
+        describeValidationIssue(issue, parsed)
+      ),
+    },
+  };
+}
+
+function describeValidationIssue(
+  issue: ZodIssue,
+  parsed: unknown,
+): StructuredValidationIssue {
+  const record = issue as unknown as Record<string, unknown>;
+  const actualValue = valueAtPath(parsed, issue.path);
+  const actual = typeof actualValue === "string" || Array.isArray(actualValue)
+    ? actualValue.length
+    : actualValue === null || ["string", "number", "boolean"].includes(typeof actualValue)
+      ? actualValue as string | number | boolean | null
+      : undefined;
+  return {
+    path: issue.path.length ? issue.path.map(String).join(".") : "$",
+    code: issue.code,
+    message: issue.message,
+    ...(typeof record.expected === "string" ? { expected: record.expected } : {}),
+    ...(typeof record.received === "string" ? { received: record.received } : {}),
+    ...(typeof record.minimum === "number" ? { minimum: record.minimum } : {}),
+    ...(typeof record.maximum === "number" ? { maximum: record.maximum } : {}),
+    ...(actual === undefined ? {} : { actual }),
+    ...(typeof record.type === "string" ? { unit: record.type } : {}),
+  };
+}
+
+function valueAtPath(value: unknown, path: Array<string | number>): unknown {
+  let current = value;
+  for (const segment of path) {
+    if (current === null || typeof current !== "object") return undefined;
+    current = (current as Record<string | number, unknown>)[segment];
+  }
+  return current;
+}
+
+function truncateDiagnosticOutput(rawOutput: string): {
+  value: string;
+  truncated: boolean;
+} {
+  if (rawOutput.length <= MAX_DIAGNOSTIC_OUTPUT_CHARS) {
+    return { value: rawOutput, truncated: false };
+  }
+  return {
+    value: `${rawOutput.slice(0, MAX_DIAGNOSTIC_OUTPUT_CHARS)}\n…[truncated]`,
+    truncated: true,
+  };
 }

@@ -373,6 +373,15 @@ export function ArtifactPanel(props: {
                   切换到 v{artifact.conflict.incoming.revisionNumber}
                   {artifact.dirty ? "(放弃未保存修改)" : ""}
                 </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="rounded-lg text-[#6B4E0F]"
+                  onClick={artifact.resolveConflictManualMerge}
+                  data-testid="artifact-conflict-manual-merge"
+                >
+                  手动合并
+                </Button>
               </div>
             </div>
           ) : null}

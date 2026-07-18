@@ -21,8 +21,9 @@ export default async function RootLayout({
     <html lang={locale} suppressHydrationWarning>
       <body className="min-h-screen bg-background font-sans text-foreground antialiased">
         <NextIntlClientProvider messages={messages} locale={locale}>
-          <WorkspaceChrome>{children}</WorkspaceChrome>
-          <Providers />
+          <Providers>
+            <WorkspaceChrome>{children}</WorkspaceChrome>
+          </Providers>
         </NextIntlClientProvider>
       </body>
     </html>

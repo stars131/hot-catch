@@ -1,7 +1,7 @@
 import { listSkillMenuItems } from "@/lib/creator/skill-registry";
 
 export type SkillScope = "generation" | "patch";
-export type SkillSource = "builtin" | "custom";
+export type SkillSource = "builtin" | "custom" | "extension";
 
 export type SkillCatalogItem = {
   id: string;

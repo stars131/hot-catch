@@ -32,6 +32,7 @@ export type ArtifactRevision = {
   bodyText: string | null;
   structuredContent: unknown;
   fullMarkdown: string | null;
+  checksum: string;
   provenance: unknown;
   createdAt: string;
 };
@@ -59,6 +60,26 @@ export type ArtifactScore = {
   warnings: string[];
 };
 
+export type ArtifactDirectionReview = {
+  id: string;
+  revisionId: string;
+  stage: "generation" | "publish";
+  status: "passed" | "needs_attention" | "unavailable";
+  primaryLabel: string;
+  secondaryLabel?: string;
+  score?: number;
+  summary: string;
+  criteria: Array<{
+    key: string;
+    label: string;
+    score: number;
+    maxScore: number;
+    passed: boolean;
+    reason: string;
+  }>;
+  suggestions: string[];
+};
+
 export type ArtifactContentData = {
   id: string;
   platform: PlatformId;
@@ -70,6 +91,7 @@ export type ArtifactContentData = {
   status: string;
   updatedAt: string;
   score: ArtifactScore | null;
+  directionReview: ArtifactDirectionReview | null;
   revisions: ArtifactRevision[];
   references: ArtifactReference[];
 };
@@ -133,6 +155,13 @@ type RawContent = {
   status: string;
   updatedAt: string;
   scoreSnapshot: unknown;
+  directionReviews?: Array<{
+    id: string;
+    revisionId: string;
+    stage: "generation" | "publish";
+    status: "passed" | "needs_attention" | "unavailable";
+    result: unknown;
+  }>;
   revisions: Array<{
     id: string;
     revisionNumber: number;
@@ -141,6 +170,7 @@ type RawContent = {
     bodyText: string | null;
     structuredContent: unknown;
     fullMarkdown: string | null;
+    checksum: string;
     provenance: unknown;
     createdAt: string;
   }>;
@@ -154,6 +184,8 @@ type RawContent = {
 };
 
 function toContentData(raw: RawContent): ArtifactContentData {
+  const latestRevisionId = raw.revisions?.[0]?.id;
+  const latestDirectionReview = raw.directionReviews?.find((review) => review.revisionId === latestRevisionId);
   return {
     id: raw.id,
     platform: raw.platform,
@@ -165,8 +197,45 @@ function toContentData(raw: RawContent): ArtifactContentData {
     status: raw.status,
     updatedAt: raw.updatedAt,
     score: parseScore(raw.scoreSnapshot),
+    directionReview: parseDirectionReview(latestDirectionReview),
     revisions: raw.revisions ?? [],
     references: raw.contentReferences ?? [],
+  };
+}
+
+function parseDirectionReview(
+  row: RawContent["directionReviews"] extends Array<infer T> | undefined ? T | undefined : never,
+): ArtifactDirectionReview | null {
+  if (!row || !row.result || typeof row.result !== "object" || Array.isArray(row.result)) return null;
+  const result = row.result as Record<string, unknown>;
+  const criteria = Array.isArray(result.criteria)
+    ? result.criteria.flatMap((value) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+        const item = value as Record<string, unknown>;
+        if (typeof item.key !== "string" || typeof item.label !== "string") return [];
+        return [{
+          key: item.key,
+          label: item.label,
+          score: typeof item.score === "number" ? item.score : 0,
+          maxScore: typeof item.maxScore === "number" ? item.maxScore : 0,
+          passed: item.passed === true,
+          reason: typeof item.reason === "string" ? item.reason : "",
+        }];
+      })
+    : [];
+  return {
+    id: row.id,
+    revisionId: row.revisionId,
+    stage: row.stage,
+    status: row.status,
+    primaryLabel: typeof result.primaryLabel === "string" ? result.primaryLabel : "表达方向",
+    ...(typeof result.secondaryLabel === "string" ? { secondaryLabel: result.secondaryLabel } : {}),
+    ...(typeof result.score === "number" ? { score: result.score } : {}),
+    summary: typeof result.summary === "string" ? result.summary : "",
+    criteria,
+    suggestions: Array.isArray(result.suggestions)
+      ? result.suggestions.filter((value): value is string => typeof value === "string")
+      : [],
   };
 }
 
@@ -345,7 +414,14 @@ export function useArtifact(contentId: string) {
           await fetch(`/api/content/${contentData.id}/revisions`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ source: "manual", ...payload }),
+            body: JSON.stringify({
+              source: "manual",
+              ...payload,
+              expectedRevisionId: knownLatestIdRef.current,
+              expectedChecksum: contentRef.current?.revisions.find(
+                (revision) => revision.id === knownLatestIdRef.current,
+              )?.checksum,
+            }),
           }),
         );
         const revision = data.revision;
@@ -508,11 +584,15 @@ export function useArtifact(contentId: string) {
     setBusyAction("score");
     try {
       if (!(await flushDraft())) return null;
-      const data = await readApiJson<{ score: ArtifactScore }>(
+      const data = await readApiJson<{ score: ArtifactScore; directionReview?: ArtifactDirectionReview | null }>(
         await fetch(`/api/content/${contentData.id}/score`, { method: "POST" }),
       );
       const score = parseScore(data.score);
-      setContent((previous) => (previous ? { ...previous, score } : previous));
+      setContent((previous) => (previous ? {
+        ...previous,
+        score,
+        directionReview: data.directionReview ?? previous.directionReview,
+      } : previous));
       return score;
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "评分失败,请重试。");
@@ -569,6 +649,13 @@ export function useArtifact(contentId: string) {
     setUpdateNotice(`已切换到 v${fresh.revisionNumber}(${sourceLabel(fresh.source)})。`);
   }, [seedDraft]);
 
+  /** 手动合并:保留当前草稿，关闭阻断提示；后续保存会基于已知最新修订创建新版本。 */
+  const resolveConflictManualMerge = useCallback(() => {
+    if (!conflictRef.current) return;
+    setConflict(null);
+    setUpdateNotice("已进入手动合并。当前草稿保持不变，保存时会创建新的人工修订。");
+  }, []);
+
   const history = historyRef.current;
   void historyVersion;
 
@@ -600,6 +687,7 @@ export function useArtifact(contentId: string) {
     exportMarkdown,
     resolveConflictKeepMine,
     resolveConflictUseIncoming,
+    resolveConflictManualMerge,
     dismissNotice: () => setUpdateNotice(null),
   };
 }

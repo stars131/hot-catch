@@ -28,6 +28,8 @@
     "retrospectives": "数据复盘",
     "connections": "连接设置",
     "skills": "Skill 设置",
+    "personas": "账号人设",
+    "tasks": "任务中心",
     "shortCreator": "创作",
     "shortHotspots": "热点",
     "shortIdeas": "选题",
@@ -47,9 +49,11 @@
   "SignIn": {
     "eyebrow": "STARTRACE / INVITED BETA",
     "title": "登录星迹内容助手",
-    "description": "当前为邀请制内测。输入受邀邮箱，我们会发送一次性登录链接。",
-    "error": "登录未完成，请确认邮箱已被邀请且邀请仍在有效期内。",
-    "email": "受邀邮箱",
+    "description": "当前为限量邀请制内测。输入邮箱和邀请码，我们会发送一次性登录链接。已注册用户只需邮箱。",
+    "error": "登录未完成。请检查邮箱、邀请码和剩余名额，或确认该邮箱已注册。",
+    "email": "邮箱",
+    "inviteCode": "邀请码",
+    "inviteCodeHelp": "首次注册需要；已注册邮箱或运营者单独邀请的邮箱可留空。",
     "submit": "发送登录链接",
     "development": "使用本地开发账号"
   },
@@ -255,6 +259,7 @@
       "deepseek": "DeepSeek 内容生成",
       "tikhub": "小红书与抖音公开或授权账号、作品和指标解析",
       "youtube_data": "使用你自己的 YouTube Data API Key 同步历史视频公开指标",
+        "x_api": "可选：优先使用 X 官方接口；未配置时自动使用公开 OSINT 数据源",
       "qwen_asr": "抖音视频语音转写",
       "aitoearn": "平台授权、素材上传、发布与记录回收",
       "firecrawl": "可选：导入普通公开网页资料"

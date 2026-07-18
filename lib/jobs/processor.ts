@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { isAppError } from "@/lib/errors";
 import { getJobHandler } from "@/lib/jobs/handlers";
 import type { JobPayload, JobResult } from "@/lib/jobs/types";
+import { appendConversationEvent } from "@/lib/events/event-service";
 
 export async function processQueuedJob(
   job: Job<JobPayload, JobResult>,
@@ -24,6 +25,7 @@ export async function processQueuedJob(
       errorMessage: null,
     },
   });
+  await emitJobEvent(databaseJobId);
 
   const handler = getJobHandler(job.data.action);
   const result = await handler(job.data, async (progress, stage) => {
@@ -33,6 +35,7 @@ export async function processQueuedJob(
       where: { id: databaseJobId, status: { not: "canceled" } },
       data: { progress: safeProgress, stage },
     });
+    await emitJobEvent(databaseJobId);
   });
 
   const finalStatus = result.finalStatus ?? "succeeded";
@@ -48,6 +51,7 @@ export async function processQueuedJob(
       completedAt: finalStatus === "succeeded" ? new Date() : null,
     },
   });
+  await emitJobEvent(databaseJobId);
   if (databaseJob.agentRunId) {
     await synchronizeGenerationBatchRun(databaseJob.agentRunId);
   }
@@ -72,6 +76,7 @@ export async function recordJobFailure(
         errorMessage: error.message,
       },
     });
+    await emitJobEvent(job.data.databaseJobId);
     return;
   }
 
@@ -84,6 +89,7 @@ export async function recordJobFailure(
       completedAt: new Date(),
     },
   });
+  await emitJobEvent(job.data.databaseJobId);
   const databaseJob = await prisma.processingJob.findUnique({
     where: { id: job.data.databaseJobId },
     select: { agentRunId: true },
@@ -119,7 +125,7 @@ async function synchronizeGenerationBatchRun(runId: string) {
         : counts.canceled === expectedCount
           ? "canceled"
           : "failed";
-  await prisma.agentRun.update({
+  const updated = await prisma.agentRun.update({
     where: { id: run.id },
     data: {
       status: nextStatus,
@@ -140,6 +146,43 @@ async function synchronizeGenerationBatchRun(runId: string) {
       errorCode: nextStatus === "failed" ? "GENERATION_BATCH_FAILED" : null,
       errorMessage:
         nextStatus === "failed" ? "所有平台生成任务均未成功。" : null,
+    },
+  });
+  if (updated.conversationId) {
+    await appendConversationEvent({
+      userId: updated.userId,
+      conversationId: updated.conversationId,
+      type: "run.updated",
+      runId: updated.id,
+      payload: { runId: updated.id, status: updated.status, output: updated.output ?? undefined },
+    });
+    if (["completed", "failed", "canceled"].includes(updated.status)) {
+      const { drainQueuedTurns } = await import("@/lib/creator/agent-service");
+      await drainQueuedTurns(updated.userId, updated.conversationId).catch(() => null);
+    }
+  }
+}
+
+async function emitJobEvent(jobId: string) {
+  const job = await prisma.processingJob.findUnique({
+    where: { id: jobId },
+    include: { agentRun: { select: { conversationId: true } } },
+  });
+  const conversationId = job?.agentRun?.conversationId;
+  if (!job || !conversationId) return;
+  await appendConversationEvent({
+    userId: job.userId,
+    conversationId,
+    type: "job.updated",
+    runId: job.agentRunId ?? undefined,
+    payload: {
+      jobId: job.id,
+      status: job.status,
+      progress: job.progress,
+      stage: job.stage,
+      resultType: job.resultType,
+      resultId: job.resultId,
+      errorCode: job.errorCode,
     },
   });
 }

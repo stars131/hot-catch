@@ -25,12 +25,12 @@ export function IdeaCandidatesCardView(props: {
 
   return (
     <section
-      className="mt-3 w-full max-w-2xl rounded-2xl border border-[#D8D1C5] bg-[#FFFDF9] p-4 sm:p-5"
+      className="animate-in fade-in slide-in-from-bottom-2 mt-3 w-full max-w-2xl rounded-xl border border-[#D8D1C5] bg-[#FFFDF9] p-4 shadow-[0_10px_30px_rgba(54,47,38,0.06)] duration-300 sm:p-5"
       data-testid={`card-idea-candidates-${props.card.id}`}
       data-state={processed ? "disabled" : props.state.phase}
     >
       <div className="flex items-start gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#EDE9E0] text-[#C83B32]">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[#E8F0EA] text-[#476451]">
           <Lightbulb className="h-4 w-4" />
         </span>
         <div>
@@ -57,10 +57,10 @@ export function IdeaCandidatesCardView(props: {
               disabled={disabled}
               onClick={() => setSelectedId(candidate.id)}
               className={cn(
-                "w-full rounded-xl border p-3 text-left transition-[border-color,background-color,transform] duration-200 active:translate-y-px",
+                "w-full rounded-lg border p-3 text-left transition-[border-color,background-color,box-shadow,transform] duration-200 active:translate-y-px",
                 active
-                  ? "border-[#C83B32] bg-[#C83B32]/[0.05]"
-                  : "border-[#DDD7CE] hover:border-[#BEB6AA] hover:bg-[#F8F5EF]",
+                  ? "-translate-y-px border-[#B9C9BD] bg-[#EDF4EE] shadow-[0_5px_14px_rgba(50,75,57,0.10)]"
+                  : "border-[#DDD7CE] hover:-translate-y-px hover:border-[#BEB6AA] hover:bg-[#FAF8F4] hover:shadow-[0_5px_14px_rgba(54,47,38,0.07)]",
                 disabled && "cursor-not-allowed opacity-60",
               )}
             >
@@ -68,7 +68,7 @@ export function IdeaCandidatesCardView(props: {
                 <span
                   className={cn(
                     "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[11px] font-semibold",
-                    active ? "bg-[#C83B32] text-[#FFFDF9]" : "bg-[#EDE9E0] text-[#67625A]",
+                    active ? "bg-[#66806D] text-white" : "bg-[#EDE9E0] text-[#67625A]",
                   )}
                 >
                   {index + 1}
@@ -85,7 +85,7 @@ export function IdeaCandidatesCardView(props: {
                     <span>{zh ? "理由" : "Why"}：{candidate.reason}</span>
                   </span>
                 </span>
-                {active ? <Check className="mt-0.5 h-4 w-4 shrink-0 text-[#C83B32]" /> : null}
+                {active ? <Check className="mt-0.5 h-4 w-4 shrink-0 text-[#476451]" /> : null}
               </div>
             </button>
           );
@@ -103,7 +103,7 @@ export function IdeaCandidatesCardView(props: {
               size="sm"
               disabled={disabled || !selectedId}
               onClick={() => props.onChoose(selectedId)}
-              className="rounded-lg bg-[#C83B32] text-[#FFFDF9] hover:bg-[#B3352D]"
+              className="rounded-md bg-[#355642] text-white hover:bg-[#294836]"
             >
               {props.state.phase === "loading" ? (
                 <Loader2 className="h-4 w-4 animate-spin" />

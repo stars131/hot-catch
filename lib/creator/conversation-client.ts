@@ -11,7 +11,7 @@ import {
   type PatchTarget,
   type PublishTarget,
 } from "@/lib/creator/chat-schemas";
-import type { ChatCard } from "@/lib/creator/chat-protocol";
+import type { ChatCard, EntityRef } from "@/lib/creator/chat-protocol";
 import type { SkillCatalogItem } from "@/lib/skills/catalog";
 
 export type MessageStatus = "pending" | "complete" | "failed";
@@ -30,6 +30,27 @@ export type ActiveRun = {
   id: string;
   status: "pending" | "running" | "waiting_input";
   command: string | null;
+};
+
+export type RunTrace = {
+  id: string;
+  status: string;
+  command: string | null;
+  errorCode: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  contextVersion: { modelName: string | null } | null;
+  jobs: Array<{ id: string; status: string; stage: string | null; progress: number; errorCode: string | null }>;
+};
+
+export type ConversationCheckpoint = {
+  id: string;
+  summary: string;
+  ledger: unknown;
+  messageCount: number;
+  tokenEstimate: number;
+  createdAt: string;
 };
 
 export type ConversationSummary = {
@@ -112,18 +133,24 @@ export async function listMessages(conversationId: string): Promise<{
   processedActionKeys: string[];
   activeRun: ActiveRun | null;
   activeSkillIds: string[];
+  runTraces: RunTrace[];
+  checkpoints: ConversationCheckpoint[];
 }> {
   const data = await readApiJson<{
     messages: RawMessage[];
     processedActionKeys: string[];
     activeRun: ActiveRun | null;
     activeSkillIds: string[];
+    runTraces: RunTrace[];
+    checkpoints: ConversationCheckpoint[];
   }>(await fetch(`/api/conversations/${conversationId}/messages`, { cache: "no-store" }));
   return {
     messages: data.messages.map(toThreadMessage),
     processedActionKeys: data.processedActionKeys,
     activeRun: data.activeRun,
     activeSkillIds: data.activeSkillIds,
+    runTraces: data.runTraces,
+    checkpoints: data.checkpoints,
   };
 }
 
@@ -134,6 +161,7 @@ export async function sendMessage(
     patchTarget?: PatchTarget;
     publishTarget?: PublishTarget;
     skillIds?: string[];
+    entityRefs?: EntityRef[];
   },
 ): Promise<{ userMessage: ThreadMessage; assistantMessage: ThreadMessage; runId: string | null }> {
   const context = {
@@ -151,7 +179,10 @@ export async function sendMessage(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         clientMessageId: `cm-${crypto.randomUUID()}`,
-        parts: [{ type: "text", text }],
+        parts: [
+          { type: "text", text },
+          ...(options?.entityRefs ?? []).map((reference) => ({ type: "entity" as const, reference })),
+        ],
         ...(Object.keys(context).length ? { context } : {}),
       }),
     }),

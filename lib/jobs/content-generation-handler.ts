@@ -26,6 +26,14 @@ import {
   type PlatformId,
   type UiLocale,
 } from "@/lib/platforms/registry";
+import { runCloudHooks } from "@/lib/hooks/registry";
+import { appendConversationEvent } from "@/lib/events/event-service";
+import {
+  directionReviewCard,
+  directionFromContentSnapshot,
+  reviewContentDirection,
+  type DirectionReviewResult,
+} from "@/lib/services/content-direction-review-service";
 
 const contentGenerationHandler: JobHandler = async (payload, reportProgress) => {
   const input = payload.input as {
@@ -33,6 +41,7 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
     conversationId?: string;
     skillIds?: string[];
     uiLocale?: string;
+    supplementalInstruction?: string;
   };
   if (!input.contentId) throw new Error("contentId is required");
 
@@ -101,9 +110,16 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
           title: content.idea.title,
           angle: content.idea.angle,
           audience: content.idea.audience,
-          notes: content.idea.notes,
+          notes: [content.idea.notes, input.supplementalInstruction]
+            .filter(Boolean)
+            .join("\n补充要求："),
         }
-      : { title: content.title, notes: content.inputText },
+      : {
+          title: content.title,
+          notes: [content.inputText, input.supplementalInstruction]
+            .filter(Boolean)
+            .join("\n补充要求："),
+        },
     persona: content.persona,
     styleProfile: content.styleProfile
       ? {
@@ -122,6 +138,7 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
         }
       : null,
     references: referenceBriefs,
+    creativeDirection: directionFromContentSnapshot(content.contextSnapshot),
   };
 
   const targetLocale: ContentLocale = isContentLocale(content.contentLocale)
@@ -129,11 +146,21 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
     : "zh-CN";
   const uiLocale: UiLocale = isUiLocale(input.uiLocale) ? input.uiLocale : "zh-CN";
   const definition = getPlatformServerDefinition(content.contentKind);
+  await runCloudHooks("generation.before", {
+    userId: payload.userId,
+    socialConnectionId: content.targetSocialConnectionId,
+    conversationId,
+    contentId: content.id,
+    sourceText: content.inputText,
+  });
   const prompt = definition.buildPrompt({
     context,
     targetLocale,
     uiLocale,
-    skillInstruction: skillSelection.promptInstruction,
+    skillInstruction: [
+      directionGenerationInstruction(directionFromContentSnapshot(content.contextSnapshot)),
+      skillSelection.promptInstruction,
+    ].filter(Boolean).join("\n\n"),
   });
 
   await reportProgress(45, "生成结构化初稿");
@@ -164,6 +191,7 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
           model: provider.model,
           targetLocale,
           skills: skillSelection.snapshots,
+          creativeDirection: directionFromContentSnapshot(content.contextSnapshot),
         } as unknown as Prisma.InputJsonValue,
       },
     );
@@ -190,6 +218,13 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
       content.contentKind,
       reportProgress,
     );
+    await reportProgress(92, "检查表达方向与证据边界");
+    const directionReview = await reviewContentDirection({
+      userId: payload.userId,
+      contentId: content.id,
+      revisionId: revision.id,
+      stage: "generation",
+    });
     await appendArtifactMessage({
       userId: payload.userId,
       conversationId,
@@ -202,6 +237,23 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
       contentLocale: targetLocale,
       normalized,
       score,
+      directionReview,
+    });
+    if (conversationId) {
+      await appendConversationEvent({
+        userId: payload.userId,
+        conversationId,
+        type: "artifact.created",
+        payload: { contentId: content.id, revisionId: revision.id, revisionNumber: revision.revisionNumber },
+      });
+    }
+    await runCloudHooks("generation.after", {
+      userId: payload.userId,
+      socialConnectionId: content.targetSocialConnectionId,
+      conversationId,
+      contentId: content.id,
+      sourceText: content.inputText,
+      payload: { revisionId: revision.id, score },
     });
 
     return {
@@ -213,6 +265,12 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
         contentLocale: targetLocale,
         revisionId: revision.id,
         ...(score === undefined ? {} : { score }),
+        ...(directionReview ? {
+          directionReview: {
+            status: directionReview.status,
+            score: directionReview.score,
+          },
+        } : {}),
       },
     };
   } catch (error) {
@@ -221,9 +279,14 @@ const contentGenerationHandler: JobHandler = async (payload, reportProgress) => 
       error.code === "AI_GENERATION_FAILED" &&
       error.statusCode === 422
     ) {
+      const diagnostics = toJson(error.details);
       return {
         finalStatus: "waiting_input",
-        output: { reason: "STRUCTURED_OUTPUT_INVALID", message: error.message },
+        output: {
+          reason: "STRUCTURED_OUTPUT_INVALID",
+          message: error.message,
+          ...(diagnostics === undefined ? {} : { diagnostics }),
+        },
       };
     }
     throw error;
@@ -274,6 +337,7 @@ async function appendArtifactMessage(params: {
   contentLocale: ContentLocale;
   normalized: NormalizedGeneratedContent;
   score?: number;
+  directionReview?: DirectionReviewResult | null;
 }) {
   if (!params.conversationId) return;
   const conversation = await prisma.conversation.findFirst({
@@ -320,16 +384,20 @@ async function appendArtifactMessage(params: {
             : []),
         ],
       },
+      ...(params.directionReview ? [directionReviewCard(params.directionReview)] : []),
     ],
   });
   const scoreSuffix =
     typeof params.score === "number" ? `，评分 ${params.score}/100` : "";
+  const directionSuffix = params.directionReview
+    ? `，方向审查${params.directionReview.status === "passed" ? "通过" : params.directionReview.status === "needs_attention" ? "需关注" : "暂不可用"}`
+    : "";
   try {
     await prisma.message.create({
       data: {
         conversationId: params.conversationId,
         role: "assistant",
-        content: `原创稿已生成：「${params.normalized.title}」（v${params.revisionNumber}${scoreSuffix}）。`,
+        content: `原创稿已生成：「${params.normalized.title}」（v${params.revisionNumber}${scoreSuffix}${directionSuffix}）。`,
         status: "complete",
         clientMessageId: `artifact:${params.jobId}`,
         metadata: metadata as unknown as Prisma.InputJsonValue,
@@ -357,6 +425,20 @@ function asRecord(value: unknown): Record<string, unknown> {
 function toJson(value: unknown): Prisma.InputJsonValue | undefined {
   if (value === undefined) return undefined;
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
+
+function directionGenerationInstruction(
+  snapshot: ReturnType<typeof directionFromContentSnapshot>,
+) {
+  if (!snapshot) return "";
+  return [
+    `主表达方向（必须决定内容骨架）：${snapshot.primary.labels.zhCN}`,
+    snapshot.primary.generation.primaryInstruction,
+    `证据边界：${snapshot.primary.evidence.policy}`,
+    snapshot.secondary
+      ? `辅表达方向（只能增强表达，不得覆盖主结构）：${snapshot.secondary.labels.zhCN}\n${snapshot.secondary.generation.secondaryInstruction}`
+      : "",
+  ].filter(Boolean).join("\n");
 }
 
 registerJobHandler("content.generate", contentGenerationHandler);

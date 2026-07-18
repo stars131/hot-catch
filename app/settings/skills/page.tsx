@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bot,
   Check,
@@ -53,34 +54,36 @@ type SkillForm = {
 };
 
 const EMPTY_FORM: SkillForm = { name: "", description: "", instructions: "" };
+const EMPTY_SKILLS: SkillCatalogItem[] = [];
 
 export default function SkillSettingsPage() {
   const locale = useLocale();
   const t = useTranslations("Skills");
   const common = useTranslations("Common");
-  const [skills, setSkills] = useState<SkillCatalogItem[]>([]);
-  const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<SkillForm>(EMPTY_FORM);
+  const queryClient = useQueryClient();
+  const skillsQuery = useQuery({
+    queryKey: ["workspace", "skills"],
+    queryFn: async () => readApiJson<{ skills: SkillCatalogItem[] }>(
+      await fetch("/api/settings/skills", { cache: "no-store" }),
+    ),
+    staleTime: 5 * 60 * 1000,
+  });
+  const skills = skillsQuery.data?.skills ?? EMPTY_SKILLS;
+  const loading = skillsQuery.isPending;
 
   const load = useCallback(async () => {
-    try {
-      const data = await readApiJson<{ skills: SkillCatalogItem[] }>(
-        await fetch("/api/settings/skills", { cache: "no-store" }),
-      );
-      setSkills(data.skills);
-    } catch (error) {
-      toast.error(locale === "zh-CN" && error instanceof Error ? error.message : "Skill loading failed");
-    } finally {
-      setLoading(false);
-    }
-  }, [locale]);
+    await queryClient.invalidateQueries({ queryKey: ["workspace", "skills"] });
+  }, [queryClient]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (skillsQuery.error) {
+      toast.error(locale === "zh-CN" && skillsQuery.error instanceof Error ? skillsQuery.error.message : "Skill loading failed");
+    }
+  }, [locale, skillsQuery.error]);
 
   const builtinSkills = useMemo(
     () => skills.filter((skill) => skill.source === "builtin"),
@@ -88,6 +91,10 @@ export default function SkillSettingsPage() {
   );
   const customSkills = useMemo(
     () => skills.filter((skill) => skill.source === "custom"),
+    [skills],
+  );
+  const extensionSkills = useMemo(
+    () => skills.filter((skill) => skill.source === "extension"),
     [skills],
   );
 
@@ -217,6 +224,17 @@ export default function SkillSettingsPage() {
           onEdit={openEdit}
           onDelete={deleteSkill}
           emptyAction={openCreate}
+        />
+
+        <SkillSection
+          title={locale === "zh-CN" ? "审核扩展" : "Reviewed extensions"}
+          description={locale === "zh-CN" ? "仅包含管理员审核的声明式 Manifest，不执行上传代码、远程 URL 或 MCP。" : "Administrator-reviewed declarative manifests only. No uploaded code, remote URLs, or MCP execution."}
+          loading={loading}
+          skills={extensionSkills}
+          busyId={busyId}
+          onToggle={toggleSkill}
+          onEdit={openEdit}
+          onDelete={deleteSkill}
         />
       </div>
 
@@ -382,7 +400,7 @@ function SkillCard(props: {
       <CardContent className="flex flex-col gap-3">
         <div className="flex flex-wrap gap-1.5">
           <Badge variant="outline">
-            {skill.source === "builtin" ? t("builtinBadge") : t("customBadge")}
+            {skill.source === "builtin" ? t("builtinBadge") : skill.source === "extension" ? (locale === "zh-CN" ? "审核扩展" : "Reviewed") : t("customBadge")}
           </Badge>
           {skill.scopes.map((scope) => (
             <Badge key={scope} variant="outline">

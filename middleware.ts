@@ -26,6 +26,8 @@ export const config = {
     "/ideas/:path*",
     "/publish/:path*",
     "/retrospectives/:path*",
+    "/personas/:path*",
+    "/tasks/:path*",
     "/settings/:path*",
   ],
 };

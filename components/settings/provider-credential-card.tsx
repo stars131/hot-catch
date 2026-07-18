@@ -31,6 +31,7 @@ import { Spinner } from "@/components/ui/spinner";
 export type CredentialProviderId =
   | "tikhub"
   | "youtube_data"
+  | "x_api"
   | "qwen_asr"
   | "aitoearn"
   | "deepseek"

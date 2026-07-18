@@ -121,9 +121,11 @@ describe("star-chat/v1 metadata schema", () => {
       skillOptions: [
         { id: "builtin.reference-to-original", label: "参考转原创" },
       ],
+      accountOptions: [],
       defaultPlatformIds: ["xiaohongshu"],
       defaultLocaleId: "zh-CN",
       defaultSkillIds: [],
+      defaultAccountBindings: {},
       confirmAction: { actionId: "creation.generate_bundle", label: "开始生成" },
     };
     const ideas = {
@@ -143,6 +145,60 @@ describe("star-chat/v1 metadata schema", () => {
 
     expect(chatCardSchema.safeParse(setup).success).toBe(true);
     expect(chatCardSchema.safeParse(ideas).success).toBe(true);
+  });
+
+  it("接受模型方向推荐卡和版本方向审查卡", () => {
+    const recommendation = {
+      id: "card-direction-demo",
+      version: 1,
+      type: "direction_recommendation",
+      decisionId: "cm12345678901234567890123",
+      brief: "帮我写一个真实的创业复盘",
+      uiLocale: "zh-CN",
+      source: "model",
+      intentSummary: "用真实经历建立信任",
+      state: "ready",
+      missingInputs: [],
+      recommendations: [{
+        id: "dir-experience-v1",
+        ref: { key: "experience", version: 1, source: "catalog" },
+        label: "经验分享",
+        summary: "用真实经历提炼方法",
+        category: "narrative",
+        confidence: 0.88,
+        rationale: "用户明确要求复盘",
+        fitSignals: ["真实经历"],
+        risks: ["不能虚构第一人称经历"],
+        outlinePreview: ["起点", "转折", "方法"],
+      }],
+      confirmAction: { actionId: "direction.confirm", label: "确认方向" },
+      supplementAction: { actionId: "direction.supplement", label: "补充并重新分析" },
+    };
+    const review = {
+      id: "card-direction-review-demo",
+      version: 1,
+      type: "direction_review",
+      contentId: "content-1",
+      revisionId: "revision-1",
+      revisionNumber: 1,
+      stage: "generation",
+      status: "needs_attention",
+      primaryLabel: "经验分享",
+      score: 64,
+      summary: "缺少真实经历线索",
+      criteria: [{
+        key: "primary:experience:structure-fit",
+        label: "经验分享 · 结构匹配",
+        score: 20,
+        maxScore: 45,
+        passed: false,
+        reason: "正文直接进入方法，没有交代经历。",
+      }],
+      suggestions: ["补充真实场景；没有素材时改为观察口吻。"],
+      actions: [{ actionId: "direction.repair", label: "按建议创建修订" }],
+    };
+    expect(chatCardSchema.safeParse(recommendation).success).toBe(true);
+    expect(chatCardSchema.safeParse(review).success).toBe(true);
   });
 });
 

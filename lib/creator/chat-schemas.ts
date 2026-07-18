@@ -10,6 +10,10 @@ import {
   CONTENT_LOCALES,
   PLATFORM_IDS,
 } from "@/lib/platforms/registry";
+import {
+  directionRefSchema,
+  directionSelectionSchema,
+} from "@/lib/creator/creative-direction";
 
 /**
  * star-chat/v1 的运行时校验。
@@ -32,6 +36,8 @@ const httpUrlSchema = z
 
 export const entityRefSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("idea"), id: z.string().min(1) }).strict(),
+  z.object({ type: z.literal("social_connection"), id: z.string().min(1) }).strict(),
+  z.object({ type: z.literal("persona"), id: z.string().min(1) }).strict(),
   z.object({ type: z.literal("benchmark_account"), id: z.string().min(1) }).strict(),
   z.object({ type: z.literal("benchmark_note"), id: z.string().min(1) }).strict(),
   z.object({ type: z.literal("content"), id: z.string().min(1) }).strict(),
@@ -83,6 +89,11 @@ export const creationSetupCardSchema = z
     ...cardBase,
     type: z.literal("creation_setup"),
     brief: z.string().trim().min(1).max(12000),
+    directionSelection: directionSelectionSchema.optional(),
+    directionSummary: z.object({
+      primaryLabel: z.string().min(1).max(80),
+      secondaryLabel: z.string().min(1).max(80).optional(),
+    }).strict().optional(),
     uiLocale: z.enum(["zh-CN", "en-US"]),
     maxPlatforms: z.literal(5),
     platformOptions: z
@@ -113,18 +124,27 @@ export const creationSetupCardSchema = z
       .array(
         z
           .object({
-            id: z.string().regex(/^(?:builtin|custom)\.[a-z0-9._-]{2,80}$/),
+            id: z.string().regex(/^(?:builtin|custom|extension)\.[a-z0-9._-]{2,80}$/),
             label: z.string().min(1).max(120),
             description: z.string().max(500).optional(),
           })
           .strict(),
       )
       .max(30),
+    accountOptions: z.array(z.object({
+      id: z.string().cuid(),
+      platform: z.enum(PLATFORM_IDS),
+      label: z.string().min(1).max(120),
+      handle: z.string().max(120).optional(),
+      avatarUrl: httpUrlSchema.optional(),
+      source: z.enum(["authorized", "manual"]),
+    }).strict()).max(100).default([]),
     defaultPlatformIds: z.array(z.enum(PLATFORM_IDS)).min(1).max(5),
     defaultLocaleId: z.enum(CONTENT_LOCALES),
     defaultSkillIds: z
-      .array(z.string().regex(/^(?:builtin|custom)\.[a-z0-9._-]{2,80}$/))
+      .array(z.string().regex(/^(?:builtin|custom|extension)\.[a-z0-9._-]{2,80}$/))
       .max(8),
+    defaultAccountBindings: z.record(z.enum(PLATFORM_IDS), z.string().cuid()).default({}),
     confirmAction: cardActionSchema,
   })
   .strict();
@@ -135,6 +155,9 @@ export const ideaCandidatesCardSchema = z
     type: z.literal("idea_candidates"),
     brief: z.string().trim().min(1).max(12000),
     direction: z.string().trim().min(1).max(200),
+    directionSelection: directionSelectionSchema.optional(),
+    primaryDirectionLabel: z.string().trim().min(1).max(80).optional(),
+    secondaryDirectionLabel: z.string().trim().min(1).max(80).optional(),
     uiLocale: z.enum(["zh-CN", "en-US"]),
     candidates: z
       .array(
@@ -154,6 +177,64 @@ export const ideaCandidatesCardSchema = z
     skipAction: cardActionSchema,
   })
   .strict();
+
+export const directionRecommendationCardSchema = z.object({
+  ...cardBase,
+  type: z.literal("direction_recommendation"),
+  decisionId: z.string().cuid(),
+  brief: z.string().trim().min(1).max(12000),
+  uiLocale: z.enum(["zh-CN", "en-US"]),
+  source: z.enum(["model", "rules"]),
+  intentSummary: z.string().min(1).max(1000),
+  state: z.enum(["ready", "needs_input"]),
+  missingInputs: z.array(z.object({
+    key: stableIdSchema,
+    label: z.string().min(1).max(80),
+    reason: z.string().min(1).max(300),
+    required: z.boolean(),
+    inputType: z.enum(["text", "choice"]),
+    options: z.array(z.string().min(1).max(80)).max(6).optional(),
+  }).strict()).max(3),
+  recommendations: z.array(z.object({
+    id: stableIdSchema,
+    ref: directionRefSchema,
+    label: z.string().min(1).max(80),
+    summary: z.string().min(1).max(300),
+    category: z.string().min(1).max(40),
+    confidence: z.number().min(0).max(1).optional(),
+    rationale: z.string().min(1).max(800),
+    fitSignals: z.array(z.string().min(1).max(160)).max(6),
+    risks: z.array(z.string().min(1).max(200)).max(5),
+    outlinePreview: z.array(z.string().min(1).max(120)).min(2).max(6),
+    suggestedSecondary: directionRefSchema.optional(),
+  }).strict()).min(1).max(3),
+  confirmAction: cardActionSchema,
+  supplementAction: cardActionSchema,
+}).strict();
+
+export const directionReviewCardSchema = z.object({
+  ...cardBase,
+  type: z.literal("direction_review"),
+  contentId: z.string().min(1).max(64),
+  revisionId: z.string().min(1).max(64),
+  revisionNumber: z.number().int().positive(),
+  stage: z.enum(["generation", "publish"]),
+  status: z.enum(["passed", "needs_attention", "unavailable"]),
+  primaryLabel: z.string().min(1).max(80),
+  secondaryLabel: z.string().min(1).max(80).optional(),
+  score: z.number().min(0).max(100).optional(),
+  summary: z.string().min(1).max(1000),
+  criteria: z.array(z.object({
+    key: stableIdSchema,
+    label: z.string().min(1).max(80),
+    score: z.number().min(0).max(100),
+    maxScore: z.number().min(1).max(100),
+    passed: z.boolean(),
+    reason: z.string().min(1).max(500),
+  }).strict()).max(12),
+  suggestions: z.array(z.string().min(1).max(300)).max(8),
+  actions: z.array(cardActionSchema).max(4),
+}).strict();
 
 export const referenceCardSchema = z
   .object({
@@ -299,6 +380,8 @@ export const publishReadinessCardSchema = z
 
 export const chatCardSchema = z.discriminatedUnion("type", [
   optionCardSchema,
+  directionRecommendationCardSchema,
+  directionReviewCardSchema,
   creationSetupCardSchema,
   ideaCandidatesCardSchema,
   referenceCardSchema,
@@ -308,7 +391,7 @@ export const chatCardSchema = z.discriminatedUnion("type", [
   noticeCardSchema,
   patchCardSchema,
   publishReadinessCardSchema,
-]) satisfies z.ZodType<ChatCard>;
+]) satisfies z.ZodType<ChatCard, z.ZodTypeDef, unknown>;
 
 export const chatMessageMetadataV1Schema = z
   .object({
@@ -316,7 +399,7 @@ export const chatMessageMetadataV1Schema = z
     cards: z.array(chatCardSchema).max(20),
     runId: z.string().min(1).max(64).optional(),
   })
-  .strict() satisfies z.ZodType<ChatMessageMetadataV1>;
+  .strict() satisfies z.ZodType<ChatMessageMetadataV1, z.ZodTypeDef, unknown>;
 
 export const agentCommandSchema = z.enum(AGENT_COMMANDS);
 
@@ -390,7 +473,7 @@ export const sendMessageRequestSchema = z
         styleProfileId: z.string().min(1).max(64).optional(),
         skillIds: z
           .array(
-            z.string().regex(/^(?:builtin|custom)\.[a-z0-9._-]{2,80}$/),
+            z.string().regex(/^(?:builtin|custom|extension)\.[a-z0-9._-]{2,80}$/),
           )
           .max(8)
           .optional(),

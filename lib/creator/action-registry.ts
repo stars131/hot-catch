@@ -1,5 +1,9 @@
 import { JobType, Prisma } from "@prisma/client";
-import type { CardAction, ChatCard } from "@/lib/creator/chat-protocol";
+import type {
+  CardAction,
+  ChatCard,
+  DirectionRecommendationCard,
+} from "@/lib/creator/chat-protocol";
 import { prisma } from "@/lib/prisma";
 import { AppError, isAppError } from "@/lib/errors";
 import { enqueueJob } from "@/lib/jobs/queues";
@@ -33,7 +37,31 @@ import {
 import { isForeignPlatformCreationEnabled } from "@/lib/env";
 import { buildCreationSetupCard } from "@/lib/creator/creation-setup";
 import { createGenerationBatch } from "@/lib/services/generation-batch-service";
-import { generateIdeaCandidatesCard } from "@/lib/creator/idea-assistant";
+import {
+  buildSelectedIdeaBrief,
+  generateIdeaCandidatesCard,
+} from "@/lib/creator/idea-assistant";
+import {
+  builtinDirection,
+  directionRefSchema,
+  type DirectionSelection,
+  type DirectionSnapshot,
+  normalizeCreativeDirection,
+} from "@/lib/creator/creative-direction";
+import {
+  confirmCreativeDirectionDecision,
+  recommendCreativeDirections,
+  type DirectionAnalysis,
+} from "@/lib/services/creative-direction-service";
+import { createLlmProvider } from "@/lib/providers/factory";
+import { getPlatformServerDefinition } from "@/lib/platforms/server-registry";
+import { scoreContentProject } from "@/lib/services/scoring-service";
+import {
+  directionFromContentSnapshot,
+  directionReviewCard,
+  reviewContentDirection,
+} from "@/lib/services/content-direction-review-service";
+import { resolvePendingInteractionByAction } from "@/lib/services/interaction-service";
 
 /**
  * C3 服务端动作注册表。
@@ -77,6 +105,48 @@ function requireOptionLabels(context: ActionContext): string[] {
     throw new Error("请先选择一个选项。");
   }
   return labels;
+}
+
+function directionRecommendationCard(params: {
+  decisionId: string;
+  brief: string;
+  uiLocale: "zh-CN" | "en-US";
+  analysis: DirectionAnalysis;
+}): DirectionRecommendationCard {
+  const zh = params.uiLocale === "zh-CN";
+  return {
+    id: `card-direction-${params.decisionId.slice(-12)}`,
+    version: 1,
+    type: "direction_recommendation",
+    decisionId: params.decisionId,
+    brief: params.brief,
+    uiLocale: params.uiLocale,
+    source: params.analysis.source,
+    intentSummary: params.analysis.intentSummary,
+    state: params.analysis.needsInput ? "needs_input" : "ready",
+    missingInputs: params.analysis.missingInputs,
+    recommendations: params.analysis.recommendations,
+    confirmAction: {
+      actionId: "direction.confirm",
+      label: zh ? "确认方向" : "Confirm direction",
+      appearance: "primary",
+    },
+    supplementAction: {
+      actionId: "direction.supplement",
+      label: zh ? "补充并重新分析" : "Add details and reanalyze",
+      appearance: "primary",
+    },
+  };
+}
+
+function parseDirectionActionText(value: string | undefined) {
+  if (!value?.trim()) return {};
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    throw new AppError("VALIDATION_ERROR", "方向选择数据格式不正确。", 422);
+  }
 }
 
 /** 参考动作共用:从卡片解析导入任务并加载脱敏 Brief;严禁读取客户端提交的实体 ID。 */
@@ -133,11 +203,285 @@ async function loadReferenceContext(context: ActionContext): Promise<{
 }
 
 export const ACTION_REGISTRY: Record<string, ActionHandler> = {
+  "direction.supplement": {
+    repeatable: false,
+    execute: async (context) => {
+      if (context.card.type !== "direction_recommendation") {
+        throw new AppError("VALIDATION_ERROR", "该动作只能由方向推荐卡触发。", 400);
+      }
+      const payload = parseDirectionActionText(context.values.text);
+      const answersValue = payload.answers;
+      const answers = answersValue && typeof answersValue === "object" && !Array.isArray(answersValue)
+        ? Object.fromEntries(Object.entries(answersValue).flatMap(([key, value]) =>
+            typeof value === "string" && value.trim() ? [[key, value.trim()]] : [],
+          ))
+        : {};
+      for (const item of context.card.missingInputs.filter((item) => item.required)) {
+        if (!answers[item.key]) {
+          throw new AppError("VALIDATION_ERROR", `请补充“${item.label}”。`, 422);
+        }
+      }
+      const result = await recommendCreativeDirections({
+        userId: context.userId,
+        conversationId: context.conversationId,
+        sourceMessageId: context.sourceMessageId,
+        brief: context.card.brief,
+        uiLocale: context.card.uiLocale,
+        supplementalAnswers: answers,
+      });
+      await resolvePendingInteractionByAction({
+        userId: context.userId,
+        conversationId: context.conversationId,
+        actionKey: `${context.card.id}:${context.action.actionId}`,
+        resolution: { answers } as Prisma.InputJsonValue,
+      });
+      return {
+        text: context.card.uiLocale === "zh-CN"
+          ? "已结合补充信息重新判断方向，请确认主方向和可选辅方向。"
+          : "I reanalyzed the brief with your additional details. Confirm a primary and optional secondary direction.",
+        cards: [directionRecommendationCard({
+          decisionId: result.decisionId,
+          brief: context.card.brief,
+          uiLocale: context.card.uiLocale,
+          analysis: result.analysis,
+        })],
+        command: "direction.analyze",
+      };
+    },
+  },
+
+  "direction.confirm": {
+    repeatable: false,
+    execute: async (context) => {
+      if (context.card.type !== "direction_recommendation") {
+        throw new AppError("VALIDATION_ERROR", "该动作只能由方向推荐卡触发。", 400);
+      }
+      if (context.card.state === "needs_input") {
+        throw new AppError("VALIDATION_ERROR", "请先补充卡片中要求的信息。", 422);
+      }
+      const payload = parseDirectionActionText(context.values.text);
+      const defaultPrimary = context.card.recommendations[0]?.ref;
+      const primary = directionRefSchema.parse(payload.primary ?? defaultPrimary);
+      const secondary = payload.secondary
+        ? directionRefSchema.parse(payload.secondary)
+        : undefined;
+      const { selection, snapshot } = await confirmCreativeDirectionDecision({
+        userId: context.userId,
+        conversationId: context.conversationId,
+        decisionId: context.card.decisionId,
+        primary,
+        secondary,
+      });
+      const zh = context.card.uiLocale === "zh-CN";
+      const primaryLabel = zh ? snapshot.primary.labels.zhCN : snapshot.primary.labels.enUS;
+      const secondaryLabel = snapshot.secondary
+        ? (zh ? snapshot.secondary.labels.zhCN : snapshot.secondary.labels.enUS)
+        : undefined;
+      const directionLabel = [primaryLabel, secondaryLabel].filter(Boolean).join(zh ? " + " : " + ");
+      try {
+        const ideaCard = await generateIdeaCandidatesCard({
+          userId: context.userId,
+          brief: context.card.brief,
+          direction: directionLabel,
+          directionSelection: selection,
+          directionSnapshot: snapshot,
+          uiLocale: context.card.uiLocale,
+          nonce: `${context.sourceMessageId}:${context.card.decisionId}`,
+        });
+        return {
+          text: zh
+            ? `已确认主方向「${primaryLabel}」${secondaryLabel ? `，辅方向「${secondaryLabel}」` : ""}。我正在按这组规则整理选题。`
+            : `Primary direction confirmed as “${primaryLabel}”${secondaryLabel ? ` with “${secondaryLabel}” as the secondary direction` : ""}. I prepared ideas using this combination.`,
+          cards: [ideaCard],
+          command: "idea.propose",
+        };
+      } catch (error) {
+        if (
+          !isAppError(error) ||
+          !["CREDENTIAL_NOT_CONFIGURED", "CREDENTIAL_INVALID", "AI_GENERATION_FAILED", "PROVIDER_ERROR"].includes(error.code)
+        ) throw error;
+      }
+      return {
+        text: zh
+          ? `方向已确认，但当前模型暂时无法生成候选选题。你仍可继续配置创作任务。`
+          : "The direction is confirmed, but the configured model could not generate idea candidates. You can continue with the creation setup.",
+        cards: [
+          {
+            id: `notice-idea-model-${context.sourceMessageId.slice(-10)}`,
+            version: 1,
+            type: "notice",
+            tone: "warning",
+            title: zh ? "未生成 AI 候选选题" : "AI idea candidates unavailable",
+            body: zh
+              ? "请检查默认模型连接。系统没有使用模板伪造候选。"
+              : "Check the default model connection. No placeholder ideas were substituted.",
+          },
+          await buildCreationSetupCard({
+            userId: context.userId,
+            conversationId: context.conversationId,
+            brief: context.card.brief,
+            directionSelection: selection,
+            directionSnapshot: snapshot,
+            uiLocale: context.card.uiLocale,
+            nonce: `${context.sourceMessageId}:${context.card.decisionId}`,
+          }),
+        ],
+        command: "content.create",
+      };
+    },
+  },
+
+  "direction.repair": {
+    repeatable: false,
+    execute: async (context) => {
+      if (context.card.type !== "direction_review") {
+        throw new AppError("VALIDATION_ERROR", "该动作只能由方向审查卡触发。", 400);
+      }
+      if (context.card.status !== "needs_attention" || !context.card.suggestions.length) {
+        throw new AppError("VALIDATION_ERROR", "当前审查没有需要自动修订的建议。", 422);
+      }
+      const content = await prisma.generatedContent.findFirst({
+        where: { id: context.card.contentId, userId: context.userId },
+        include: { revisions: { orderBy: { revisionNumber: "desc" }, take: 1 } },
+      });
+      const latest = content?.revisions[0];
+      if (!content || !latest) throw new AppError("NOT_FOUND", "内容版本不存在。", 404);
+      if (latest.id !== context.card.revisionId) {
+        throw new AppError("CONFLICT", "内容已产生新版本，请对最新版本重新审查后再修订。", 409);
+      }
+      if (!isContentLocale(content.contentLocale)) {
+        throw new AppError("VALIDATION_ERROR", "内容语言不受支持。", 422);
+      }
+      const direction = directionFromContentSnapshot(content.contextSnapshot);
+      if (!direction) throw new AppError("VALIDATION_ERROR", "该内容没有可用的方向快照。", 422);
+      const definition = getPlatformServerDefinition(content.contentKind);
+      const provider = await createLlmProvider(context.userId);
+      const generated = await provider.generateStructured({
+        system: [
+          "你是内容修订编辑。根据给定方向 Manifest 和审查建议修订内容，保留没有问题的信息与结构。",
+          "不得新增未经用户提供的经历、事实、数据、热点或承诺。只返回符合目标平台 Schema 的 JSON。",
+          `主方向：${direction.primary.labels.zhCN}\n${direction.primary.generation.primaryInstruction}`,
+          direction.secondary
+            ? `辅方向：${direction.secondary.labels.zhCN}\n${direction.secondary.generation.secondaryInstruction}`
+            : "",
+          `证据边界：${direction.primary.evidence.policy}`,
+        ].filter(Boolean).join("\n\n"),
+        prompt: JSON.stringify({
+          current: {
+            title: latest.title,
+            bodyText: latest.bodyText,
+            structuredContent: latest.structuredContent,
+          },
+          reviewSummary: context.card.summary,
+          suggestions: context.card.suggestions,
+          targetLocale: content.contentLocale,
+          platform: content.platform,
+        }),
+        schema: definition.schema,
+        temperature: 0.2,
+      });
+      const parsed = definition.schema.parse(generated);
+      const normalized = definition.normalize(parsed);
+      const revision = await createContentRevision(
+        context.userId,
+        content.id,
+        {
+          source: "generated",
+          title: normalized.title,
+          bodyText: normalized.bodyText,
+          structuredContent: parsed,
+          fullMarkdown: normalized.fullMarkdown,
+        },
+        {
+          provenance: {
+            promptVersion: "direction-repair/v1",
+            provider: provider.name,
+            model: provider.model,
+            basedOnRevisionId: latest.id,
+            suggestions: context.card.suggestions,
+          } as unknown as Prisma.InputJsonValue,
+        },
+      );
+      const parsedRecord = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : {};
+      await prisma.generatedContent.update({
+        where: { id: content.id },
+        data: {
+          scriptSpec: parsed as unknown as Prisma.InputJsonValue,
+          tags: normalized.tags,
+          riskNotes: normalized.riskNotes.join("\n"),
+          modelName: `${provider.name}/${provider.model}`,
+          promptVersion: "direction-repair/v1",
+          ...(content.contentKind === "xhs_graphic" ? {
+            generatedTitleOptions: toNullableJson(parsedRecord.titleOptions),
+            coverTextOptions: toNullableJson(parsedRecord.coverTextOptions),
+            pageStructure: toNullableJson(parsedRecord.pages),
+            interactionEnding: typeof parsedRecord.interactionEnding === "string"
+              ? parsedRecord.interactionEnding
+              : null,
+          } : {}),
+        },
+      });
+      const scoring = content.contentKind === "xhs_graphic" || content.contentKind === "douyin_video_script"
+        ? await scoreContentProject(context.userId, content.id)
+        : null;
+      const review = await reviewContentDirection({
+        userId: context.userId,
+        contentId: content.id,
+        revisionId: revision.id,
+        stage: "generation",
+      });
+      const cards: ChatCard[] = [{
+        id: `card-artifact-repair-${revision.id.slice(-12)}`,
+        version: 1,
+        type: "artifact",
+        contentId: content.id,
+        revisionId: revision.id,
+        revisionNumber: revision.revisionNumber,
+        platform: definition.platform,
+        contentKind: content.contentKind,
+        contentLocale: content.contentLocale,
+        title: normalized.title,
+        preview: normalized.bodyText.slice(0, 200),
+        ...(scoring ? { score: scoring.score.total } : {}),
+        actions: [
+          { actionId: "artifact.open", label: "打开编辑", appearance: "primary", repeatable: true },
+          { actionId: "artifact.refine", label: "继续优化", repeatable: true },
+          ...(definition.platform === "xiaohongshu" || definition.platform === "douyin"
+            ? [{ actionId: "publish.prepare", label: "准备发布", repeatable: true }]
+            : []),
+        ],
+      }];
+      if (review) cards.push(directionReviewCard(review));
+      return {
+        text: `已根据方向审查建议创建 v${revision.revisionNumber}，原 v${latest.revisionNumber} 保留在版本历史中。`,
+        cards,
+        command: "content.generate",
+      };
+    },
+  },
+
   /** 选项卡:确认内容方向 */
   "direction.choose": {
     repeatable: false,
     execute: async (context) => {
       const labels = requireOptionLabels(context);
+      const creativeDirection = normalizeCreativeDirection(
+        context.values.optionIds?.[0] ?? labels[0],
+      );
+      if (!creativeDirection) {
+        throw new AppError("VALIDATION_ERROR", "无法识别所选表达方向。", 400);
+      }
+      const manifest = builtinDirection(creativeDirection);
+      if (!manifest) throw new AppError("VALIDATION_ERROR", "方向定义不存在。", 422);
+      const directionSelection: DirectionSelection = {
+        primary: { key: manifest.key, version: manifest.version, source: "catalog" },
+      };
+      const directionSnapshot: DirectionSnapshot = {
+        primary: manifest,
+        capturedAt: new Date().toISOString(),
+      };
       const sourceMessage = await prisma.message.findFirst({
         where: {
           id: context.sourceMessageId,
@@ -170,6 +514,8 @@ export const ACTION_REGISTRY: Record<string, ActionHandler> = {
           userId: context.userId,
           brief: latestBrief?.content || brief,
           direction: labels.join(uiLocale === "zh-CN" ? "、" : ", "),
+          directionSelection,
+          directionSnapshot,
           uiLocale,
           nonce: `${context.sourceMessageId}:${latestBrief?.id ?? "brief"}`,
         });
@@ -218,6 +564,8 @@ export const ACTION_REGISTRY: Record<string, ActionHandler> = {
             userId: context.userId,
             conversationId: context.conversationId,
             brief,
+            directionSelection,
+            directionSnapshot,
             uiLocale,
             nonce: `${context.sourceMessageId}:${latestBrief?.id ?? "brief"}`,
           }),
@@ -261,19 +609,16 @@ export const ACTION_REGISTRY: Record<string, ActionHandler> = {
               source: "conversation_ai",
               sourceCardId: context.card.id,
               direction: context.card.direction,
+              directionSelection: context.card.directionSelection,
             },
           },
         }));
-      const brief = [
-        candidate.title,
-        candidate.angle,
-        context.card.uiLocale === "zh-CN"
-          ? `目标受众：${candidate.audience}`
-          : `Audience: ${candidate.audience}`,
-        context.card.uiLocale === "zh-CN"
-          ? `创作理由：${candidate.reason}`
-          : `Why this idea: ${candidate.reason}`,
-      ].join("\n");
+      const brief = buildSelectedIdeaBrief({
+        originalBrief: context.card.brief,
+        direction: context.card.direction,
+        uiLocale: context.card.uiLocale,
+        candidate,
+      });
       return {
         text:
           context.card.uiLocale === "zh-CN"
@@ -284,6 +629,13 @@ export const ACTION_REGISTRY: Record<string, ActionHandler> = {
             userId: context.userId,
             conversationId: context.conversationId,
             brief,
+            directionSelection: context.card.directionSelection,
+            directionSummary: {
+              primaryLabel: context.card.primaryDirectionLabel ?? context.card.direction,
+              ...(context.card.secondaryDirectionLabel
+                ? { secondaryLabel: context.card.secondaryDirectionLabel }
+                : {}),
+            },
             uiLocale: context.card.uiLocale,
             nonce: `${context.card.id}:${idea.id}`,
           }),
@@ -309,6 +661,13 @@ export const ACTION_REGISTRY: Record<string, ActionHandler> = {
             userId: context.userId,
             conversationId: context.conversationId,
             brief: [context.card.brief, context.card.direction].join("\n"),
+            directionSelection: context.card.directionSelection,
+            directionSummary: {
+              primaryLabel: context.card.primaryDirectionLabel ?? context.card.direction,
+              ...(context.card.secondaryDirectionLabel
+                ? { secondaryLabel: context.card.secondaryDirectionLabel }
+                : {}),
+            },
             uiLocale: context.card.uiLocale,
             nonce: `${context.card.id}:skip`,
           }),
@@ -335,6 +694,13 @@ export const ACTION_REGISTRY: Record<string, ActionHandler> = {
       const skillIds = context.card.skillOptions
         .map((option) => option.id)
         .filter((id) => selected.has(id));
+      const accountBindings = Object.fromEntries(
+        context.card.accountOptions.flatMap((account) =>
+          selected.has(`account:${account.platform}:${account.id}`)
+            ? [[account.platform, account.id]]
+            : [],
+        ),
+      );
       if (!targetPlatforms.length || targetPlatforms.length > context.card.maxPlatforms) {
         throw new AppError("VALIDATION_ERROR", "请选择 1–5 个目标平台。", 400);
       }
@@ -346,9 +712,11 @@ export const ACTION_REGISTRY: Record<string, ActionHandler> = {
         conversationId: context.conversationId,
         input: {
           brief: context.card.brief,
+          directionSelection: context.card.directionSelection,
           targetPlatforms,
           targetLocale: targetLocales[0],
           skillIds,
+          accountBindings,
         },
         idempotencyKey: `chat:${context.card.id}`,
         uiLocale: context.card.uiLocale,
@@ -893,4 +1261,9 @@ export function getActionHandler(actionId: string): ActionHandler | null {
   return Object.prototype.hasOwnProperty.call(ACTION_REGISTRY, actionId)
     ? ACTION_REGISTRY[actionId]
     : null;
+}
+
+function toNullableJson(value: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
+  if (value === undefined || value === null) return Prisma.JsonNull;
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }

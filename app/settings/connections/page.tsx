@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import {
   ExternalLink as ExternalLinkIcon,
@@ -63,6 +64,7 @@ type BusyState = {
 } | null;
 
 const MODEL_PROVIDER_ORDER: LlmProviderId[] = ["openai", "grok", "deepseek"];
+const EMPTY_CREDENTIALS: CredentialSummaryView[] = [];
 
 const MODEL_PROVIDERS: CredentialProviderCardDefinition[] = MODEL_PROVIDER_ORDER.map(
   (provider) => {
@@ -88,6 +90,14 @@ const INTEGRATION_PROVIDERS: CredentialProviderCardDefinition[] = [
     purpose: "YouTube 历史视频公开指标同步",
     placeholder: "AIza...",
     docsUrl: "https://console.cloud.google.com/apis/library/youtube.googleapis.com",
+    kind: "integration",
+  },
+  {
+    provider: "x_api",
+    name: "X API",
+    purpose: "可选：优先使用 X 官方接口；未配置时自动使用公开 OSINT 数据源",
+    placeholder: "X API Bearer Token",
+    docsUrl: "https://docs.x.com/x-api/overview",
     kind: "integration",
   },
   {
@@ -134,19 +144,34 @@ const PROVIDER_BY_ID = new Map(
 export default function ConnectionsPage() {
   const locale = useLocale();
   const t = useTranslations("Connections");
-  const [summaries, setSummaries] = useState<CredentialSummaryView[]>([]);
-  const [defaultLlmProvider, setDefaultLlmProvider] =
-    useState<LlmProviderId | null>(null);
-  const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<ConfigurableProviderId | null>(null);
   const [busyState, setBusyState] = useState<BusyState>(null);
   const [forms, setForms] = useState<
     Partial<Record<ConfigurableProviderId, CredentialFormValue>>
   >({});
   const [authBusy, setAuthBusy] = useState<string | null>(null);
-  const [aiStatus, setAiStatus] = useState<AiToEarnStatus | null>(null);
   const [accounts, setAccounts] = useState<PublishAccount[] | null>(null);
   const [accountsError, setAccountsError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const credentialsQuery = useQuery({
+    queryKey: ["workspace", "credential-summaries"],
+    queryFn: async () => readApiJson<CredentialSettingsResponse>(
+      await fetch("/api/settings/credentials", { cache: "no-store" }),
+    ),
+    staleTime: 2 * 60 * 1000,
+  });
+  const aiStatusQuery = useQuery({
+    queryKey: ["workspace", "aitoearn-status"],
+    queryFn: async () => readApiJson<AiToEarnStatus>(
+      await fetch("/api/integrations/aitoearn/status", { cache: "no-store" }),
+    ),
+    staleTime: 60 * 1000,
+    retry: false,
+  });
+  const summaries = credentialsQuery.data?.credentials ?? EMPTY_CREDENTIALS;
+  const defaultLlmProvider = credentialsQuery.data?.defaultLlmProvider ?? null;
+  const aiStatus = aiStatusQuery.data ?? null;
+  const loading = credentialsQuery.isPending;
 
   const summaryMap = useMemo(
     () => new Map(summaries.map((item) => [item.provider, item])),
@@ -154,32 +179,17 @@ export default function ConnectionsPage() {
   );
 
   const load = useCallback(async () => {
-    const [credentialsResult, aiStatusResult] = await Promise.allSettled([
-      fetch("/api/settings/credentials", { cache: "no-store" }).then(
-        readApiJson<CredentialSettingsResponse>,
-      ),
-      fetch("/api/integrations/aitoearn/status", { cache: "no-store" }).then(
-        readApiJson<AiToEarnStatus>,
-      ),
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["workspace", "credential-summaries"] }),
+      queryClient.invalidateQueries({ queryKey: ["workspace", "aitoearn-status"] }),
     ]);
-
-    if (credentialsResult.status === "fulfilled") {
-      setSummaries(credentialsResult.value.credentials);
-      setDefaultLlmProvider(credentialsResult.value.defaultLlmProvider);
-    } else {
-      toast.error(
-        localizedConnectionError(credentialsResult.reason, locale, t("loadFailed")),
-      );
-    }
-    setAiStatus(
-      aiStatusResult.status === "fulfilled" ? aiStatusResult.value : null,
-    );
-    setLoading(false);
-  }, [locale, t]);
+  }, [queryClient]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (credentialsQuery.error) {
+      toast.error(localizedConnectionError(credentialsQuery.error, locale, t("loadFailed")));
+    }
+  }, [credentialsQuery.error, locale, t]);
 
   function formFor(provider: ConfigurableProviderId) {
     return forms[provider] ?? createInitialForm(PROVIDER_BY_ID.get(provider));
@@ -286,7 +296,10 @@ export default function ConnectionsPage() {
           body: JSON.stringify({ provider }),
         }),
       );
-      setDefaultLlmProvider(data.defaultLlmProvider);
+      queryClient.setQueryData<CredentialSettingsResponse>(["workspace", "credential-summaries"], (current) => ({
+        credentials: current?.credentials ?? summaries,
+        defaultLlmProvider: data.defaultLlmProvider,
+      }));
       toast.success(t("defaultToast", { provider: LLM_PROVIDER_DEFINITIONS[provider].name }));
     } catch (cause) {
       toast.error(localizedConnectionError(cause, locale, t("defaultFailed")));

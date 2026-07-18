@@ -11,6 +11,7 @@ import "@/lib/jobs/transcription-handler";
 import "@/lib/jobs/publishing-handler";
 import "@/lib/jobs/metrics-handler";
 import "@/lib/jobs/tracking-handler";
+import "@/lib/jobs/workflow-handler";
 import { QUEUE_NAMES, type JobPayload, type JobResult } from "@/lib/jobs/types";
 
 const workers = Object.values(JobType).map(

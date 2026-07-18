@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   AlertCircle,
   CircleStop,
@@ -13,12 +14,18 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { scrollFollowState, type ScrollFollowState } from "@/lib/conversations/scroll-follow";
 import type {
   ArtifactCard,
   PatchCard,
   PublishReadinessCard,
 } from "@/lib/creator/chat-protocol";
-import type { ActiveRun, ThreadMessage } from "@/lib/creator/conversation-client";
+import type {
+  ActiveRun,
+  ConversationCheckpoint,
+  RunTrace,
+  ThreadMessage,
+} from "@/lib/creator/conversation-client";
 import {
   CardRenderer,
   type InvokeCardAction,
@@ -48,6 +55,8 @@ export function ConversationThread(props: {
   busy: boolean;
   processedKeys: string[];
   activeRun: ActiveRun | null;
+  runTraces: RunTrace[];
+  checkpoints: ConversationCheckpoint[];
   quickEntries: QuickEntry[];
   onQuickEntry: (entry: QuickEntry) => void;
   onStartNew: () => void;
@@ -65,10 +74,36 @@ export function ConversationThread(props: {
   onJobSettled?: () => void;
 }) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const followOutputRef = useRef<ScrollFollowState>("following");
+  const lastMessageContentLength = props.messages.at(-1)?.content.length ?? 0;
+  const virtualizer = useVirtualizer({
+    count: props.messages.length,
+    getScrollElement: () => document.getElementById("conversation-scroll-root"),
+    estimateSize: () => 140,
+    overscan: 8,
+    getItemKey: (index) => props.messages[index]?.id ?? index,
+  });
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [props.messages.length, props.busy]);
+    const scrollRoot = document.getElementById("conversation-scroll-root");
+    if (!scrollRoot) return;
+    const updateFollowState = () => {
+      followOutputRef.current = scrollFollowState(
+        scrollRoot.scrollHeight - scrollRoot.scrollTop - scrollRoot.clientHeight,
+        followOutputRef.current,
+      );
+    };
+    scrollRoot.addEventListener("scroll", updateFollowState, { passive: true });
+    return () => scrollRoot.removeEventListener("scroll", updateFollowState);
+  }, []);
+
+  useEffect(() => {
+    if (followOutputRef.current !== "following") return;
+    requestAnimationFrame(() => {
+      if (props.messages.length) virtualizer.scrollToIndex(props.messages.length - 1, { align: "end" });
+      else bottomRef.current?.scrollIntoView({ block: "end" });
+    });
+  }, [props.messages.length, lastMessageContentLength, props.busy, virtualizer]);
 
   if (props.state === "loading") {
     return (
@@ -95,7 +130,7 @@ export function ConversationThread(props: {
           {props.errorMessage ?? "会话不存在,或不属于当前账号。"}
         </p>
         <Button
-          className="mt-6 rounded-lg bg-[#C83B32] text-[#FFFDF9] hover:bg-[#B3352D]"
+          className="mt-6 rounded-md bg-[#355642] text-white hover:bg-[#294836]"
           onClick={props.onStartNew}
         >
           新建创作会话
@@ -140,9 +175,23 @@ export function ConversationThread(props: {
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-6">
-      <ul className="space-y-5" aria-live="polite">
-        {props.messages.map((message, index) => (
-          <li key={message.id} data-role={message.role} data-status={message.status}>
+      <ul
+        className="relative"
+        aria-live="polite"
+        style={{ height: `${virtualizer.getTotalSize()}px` }}
+      >
+        {virtualizer.getVirtualItems().map((item) => {
+          const message = props.messages[item.index];
+          return (
+          <li
+            key={message.id}
+            ref={virtualizer.measureElement}
+            data-index={item.index}
+            data-role={message.role}
+            data-status={message.status}
+            className="absolute left-0 top-0 w-full pb-5"
+            style={{ transform: `translateY(${item.start}px)` }}
+          >
             {message.role === "user" ? (
               <div className="ml-auto w-fit max-w-[85%] rounded-xl bg-[#EDE9E0] px-3.5 py-2.5 text-[15px] leading-7">
                 {message.content}
@@ -151,7 +200,7 @@ export function ConversationThread(props: {
               <div className="max-w-none">
                 {message.status === "pending" ? (
                   <p className="flex items-center gap-2 text-sm text-[#746F67]">
-                    <Loader2 className="h-4 w-4 animate-spin text-[#C83B32]" />
+                    <Loader2 className="h-4 w-4 animate-spin text-[#66806D]" />
                     星迹正在处理…
                   </p>
                 ) : (
@@ -169,7 +218,7 @@ export function ConversationThread(props: {
                     size="sm"
                     variant="outline"
                     className="mt-2 rounded-lg border-[#DDD7CE]"
-                    onClick={() => props.onRetry(props.messages[index - 1] ?? message)}
+                    onClick={() => props.onRetry(props.messages[item.index - 1] ?? message)}
                   >
                     <RotateCcw className="h-3.5 w-3.5" /> 重试
                   </Button>
@@ -195,10 +244,50 @@ export function ConversationThread(props: {
               </div>
             )}
           </li>
-        ))}
+        );})}
+      </ul>
+      {props.runTraces.length || props.checkpoints.length ? (
+        <div className="mt-5 space-y-2 border-t border-[#E4DED4] pt-4">
+          {props.runTraces.length ? (
+            <details className="rounded-lg border border-[#E4DED4] bg-[#FAF9F6] px-3 py-2">
+              <summary className="cursor-pointer text-sm font-medium text-[#4F4A43]">
+                运行轨迹 ({props.runTraces.length})
+              </summary>
+              <div className="mt-3 space-y-2">
+                {props.runTraces.map((trace) => (
+                  <RunTraceRow key={trace.id} trace={trace} />
+                ))}
+              </div>
+            </details>
+          ) : null}
+          {props.checkpoints.length ? (
+            <details className="rounded-lg border border-[#E4DED4] bg-[#FAF9F6] px-3 py-2">
+              <summary className="cursor-pointer text-sm font-medium text-[#4F4A43]">
+                上下文检查点 ({props.checkpoints.length})
+              </summary>
+              <div className="mt-3 space-y-3">
+                {props.checkpoints.map((checkpoint) => (
+                  <div key={checkpoint.id} className="border-l-2 border-[#C8C1B5] pl-3 text-xs leading-5 text-[#67625A]">
+                    <p className="font-medium text-[#4F4A43]">
+                      {checkpoint.messageCount} 条消息 · 约 {checkpoint.tokenEstimate.toLocaleString()} tokens
+                    </p>
+                    <p className="mt-1 whitespace-pre-wrap">{checkpoint.summary}</p>
+                    {hasLedgerEntries(checkpoint.ledger) ? (
+                      <pre className="mt-2 max-h-32 overflow-auto rounded bg-[#F1EEE8] p-2 text-[11px]">
+                        {JSON.stringify(checkpoint.ledger, null, 2)}
+                      </pre>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
+      <ul className="mt-2 flex flex-col gap-3">
         {props.busy ? (
           <li className="flex items-center gap-2 text-sm text-[#746F67]">
-            <Loader2 className="h-4 w-4 animate-spin text-[#C83B32]" /> 星迹正在思考…
+            <Loader2 className="h-4 w-4 animate-spin text-[#66806D]" /> 星迹正在思考…
           </li>
         ) : null}
         {props.activeRun && !props.busy ? (
@@ -228,4 +317,28 @@ export function ConversationThread(props: {
       <div ref={bottomRef} />
     </div>
   );
+}
+
+function RunTraceRow({ trace }: { trace: RunTrace }) {
+  const started = trace.startedAt ? new Date(trace.startedAt).getTime() : new Date(trace.createdAt).getTime();
+  const ended = trace.completedAt ? new Date(trace.completedAt).getTime() : Date.now();
+  const duration = Math.max(0, Math.round((ended - started) / 100) / 10);
+  return (
+    <details className="rounded border border-[#E4DED4] bg-[#FFFDF9] px-2.5 py-2">
+      <summary className="cursor-pointer text-xs text-[#4F4A43]">
+        {trace.command ?? "agent.run"} · {trace.status} · {duration}s
+      </summary>
+      <div className="mt-2 space-y-1 text-xs text-[#746F67]">
+        {trace.contextVersion?.modelName ? <p>模型：{trace.contextVersion.modelName}</p> : null}
+        {trace.errorCode ? <p className="text-[#8A2B24]">错误：{trace.errorCode}</p> : null}
+        {trace.jobs.map((job) => (
+          <p key={job.id}>{job.stage ?? "任务"} · {job.status} · {job.progress}%{job.errorCode ? ` · ${job.errorCode}` : ""}</p>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function hasLedgerEntries(value: unknown) {
+  return Boolean(value && typeof value === "object" && Object.keys(value as Record<string, unknown>).length);
 }

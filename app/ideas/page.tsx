@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { Archive, ArrowRight, Lightbulb, MessageSquarePlus, Search } from "lucide-react";
 import { toast } from "sonner";
@@ -23,29 +24,26 @@ type Idea = {
   trendTopic: { currentScore: number | null } | null;
   _count: { contents: number };
 };
+const EMPTY_IDEAS: Idea[] = [];
 
 export default function IdeasPage() {
-  const [ideas, setIdeas] = useState<Idea[]>([]);
-  const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await readApiJson<{ ideas: Idea[] }>(
-        await fetch("/api/ideas", { cache: "no-store" }),
-      );
-      setIdeas(data.ideas);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "选题加载失败");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const queryClient = useQueryClient();
+  const ideasQuery = useQuery({
+    queryKey: ["workspace", "ideas"],
+    queryFn: async () => readApiJson<{ ideas: Idea[] }>(
+      await fetch("/api/ideas", { cache: "no-store" }),
+    ),
+    staleTime: 3 * 60 * 1000,
+  });
+  const ideas = ideasQuery.data?.ideas ?? EMPTY_IDEAS;
+  const loading = ideasQuery.isPending;
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (ideasQuery.error) {
+      toast.error(ideasQuery.error instanceof Error ? ideasQuery.error.message : "选题加载失败");
+    }
+  }, [ideasQuery.error]);
 
   const visible = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -67,7 +65,9 @@ export default function IdeasPage() {
           body: JSON.stringify({ status: "archived" }),
         }),
       );
-      setIdeas((current) => current.filter((idea) => idea.id !== ideaId));
+      queryClient.setQueryData<{ ideas: Idea[] }>(["workspace", "ideas"], (current) => ({
+        ideas: (current?.ideas ?? []).filter((idea) => idea.id !== ideaId),
+      }));
       toast.success("选题已归档");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "归档失败");

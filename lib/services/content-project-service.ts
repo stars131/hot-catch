@@ -57,6 +57,10 @@ export async function getContentProject(userId: string, contentId: string) {
         orderBy: { createdAt: "asc" },
         select: { id: true, role: true, sourceUrl: true, snapshot: true, createdAt: true },
       },
+      directionReviews: {
+        orderBy: { createdAt: "desc" },
+        take: 20,
+      },
     },
   });
   if (!content) throw new AppError("NOT_FOUND", "内容项目不存在。", 404);
@@ -81,6 +85,22 @@ export async function createContentRevision(
     select: { id: true },
   });
   if (!content) throw new AppError("NOT_FOUND", "内容项目不存在。", 404);
+
+  if (input.expectedRevisionId || input.expectedChecksum) {
+    const latestRevision = await prisma.contentRevision.findFirst({
+      where: { contentId, userId },
+      orderBy: { revisionNumber: "desc" },
+      select: { id: true, revisionNumber: true, checksum: true, source: true, createdAt: true },
+    });
+    if (
+      (input.expectedRevisionId && latestRevision?.id !== input.expectedRevisionId) ||
+      (input.expectedChecksum && latestRevision?.checksum !== input.expectedChecksum)
+    ) {
+      throw new AppError("CONFLICT", "作品已产生新版本，请先处理版本冲突。", 409, {
+        latestRevision,
+      });
+    }
+  }
 
   if (options.originJobId) {
     const replayed = await findRevisionByOriginJob(userId, contentId, options.originJobId);

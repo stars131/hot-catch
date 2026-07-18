@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import {
   BarChart3,
@@ -17,10 +18,13 @@ import {
   Rocket,
   Settings,
   SlidersHorizontal,
+  ListTodo,
+  UserRound,
   X,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
+import { prefetchWorkspaceData } from "@/lib/workspace-prefetch";
 
 const navigation = [
   { href: "/creator", labelKey: "creator", shortLabelKey: "shortCreator", icon: FilePenLine },
@@ -28,6 +32,8 @@ const navigation = [
   { href: "/ideas", labelKey: "ideas", shortLabelKey: "shortIdeas", icon: Lightbulb },
   { href: "/publish", labelKey: "publish", shortLabelKey: "shortPublish", icon: Rocket },
   { href: "/retrospectives", labelKey: "retrospectives", shortLabelKey: "shortRetrospectives", icon: BarChart3 },
+  { href: "/personas", labelKey: "personas", shortLabelKey: "personas", icon: UserRound },
+  { href: "/tasks", labelKey: "tasks", shortLabelKey: "tasks", icon: ListTodo },
   { href: "/settings/connections", labelKey: "connections", shortLabelKey: "connections", icon: Settings },
   { href: "/settings/skills", labelKey: "skills", shortLabelKey: "skills", icon: Puzzle },
 ] as const;
@@ -44,6 +50,8 @@ const workspacePrefixes = [
   "/ideas",
   "/publish",
   "/retrospectives",
+  "/personas",
+  "/tasks",
   "/settings",
 ] as const;
 
@@ -225,9 +233,13 @@ function NavItem(props: {
   onNavigate: () => void;
 }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const t = useTranslations("Navigation");
   const Icon = props.item.icon;
-  const preload = () => router.prefetch(props.item.href);
+  const preload = () => {
+    router.prefetch(props.item.href);
+    prefetchWorkspaceData(queryClient, props.item.href);
+  };
   return (
     <Link
       href={props.item.href}
@@ -260,9 +272,13 @@ function MobileNavItem(props: {
   onNavigate: () => void;
 }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const t = useTranslations("Navigation");
   const Icon = props.item.icon;
-  const preload = () => router.prefetch(props.item.href);
+  const preload = () => {
+    router.prefetch(props.item.href);
+    prefetchWorkspaceData(queryClient, props.item.href);
+  };
   return (
     <Link
       href={props.item.href}

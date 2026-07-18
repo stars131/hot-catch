@@ -39,7 +39,7 @@ export function PatchCardView(props: {
       data-patch-status={applied ? "applied" : dismissed ? "dismissed" : "proposed"}
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <PenLine className="h-4 w-4 shrink-0 text-[#C83B32]" aria-hidden />
+        <PenLine className="h-4 w-4 shrink-0 text-[#476451]" aria-hidden />
         <span className="text-sm font-medium text-[#1F1D19]">
           修改提案:{card.sectionLabel}
         </span>
@@ -108,7 +108,7 @@ export function PatchCardView(props: {
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Button
           size="sm"
-          className="rounded-lg bg-[#C83B32] text-[#FFFDF9] hover:bg-[#B3352D]"
+          className="rounded-md bg-[#355642] text-white hover:bg-[#294836]"
           disabled={settled || loading}
           onClick={() => props.onInvoke("patch.apply")}
           data-testid="patch-apply"

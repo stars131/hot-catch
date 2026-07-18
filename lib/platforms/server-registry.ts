@@ -16,6 +16,29 @@ import {
 
 const riskNotesSchema = z.array(z.string().max(500)).max(12).default([]);
 
+const XHS_OUTPUT_CONTRACT = `JSON 字段约束：
+- title：5-40 个字符。
+- titleOptions：3-10 个标题，每个 5-40 个字符。
+- coverTextOptions：2-6 个封面文案，每个 2-24 个字符。
+- pages：3-20 页；每页必须包含 pageNumber（正整数）、heading（1-50 字符）、body（10-1200 字符）、visualSuggestion（2-500 字符）。
+- bodyText：100-10000 个字符，必须是可直接发布的完整正文。
+- tags：3-15 个标签；interactionEnding：5-500 个字符；riskNotes：0-10 条。
+下面仅为 JSON 形状示例。必须替换所有示例内容，不得照抄：
+{
+  "title": "这是一个符合长度要求的示例标题",
+  "titleOptions": ["第一个完整示例标题", "第二个完整示例标题", "第三个完整示例标题"],
+  "coverTextOptions": ["示例封面一", "示例封面二"],
+  "pages": [
+    {"pageNumber": 1, "heading": "第一页标题", "body": "第一页正文至少需要十个字符并表达完整信息。", "visualSuggestion": "清晰描述画面主体和排版"},
+    {"pageNumber": 2, "heading": "第二页标题", "body": "第二页正文至少需要十个字符并承接上一页。", "visualSuggestion": "使用与内容对应的真实场景"},
+    {"pageNumber": 3, "heading": "第三页标题", "body": "第三页正文至少需要十个字符并完成观点收束。", "visualSuggestion": "突出结论和互动提示"}
+  ],
+  "bodyText": "这是一段用于展示字段长度和 JSON 形状的完整示例正文。实际生成时必须结合用户主题重新创作，提供具体、连贯、可执行的信息，并确保正文总长度不少于一百个字符。不要复制这段示例，也不要省略页面结构、标签、互动结尾或风险提示等必需字段。",
+  "tags": ["示例标签一", "示例标签二", "示例标签三"],
+  "interactionEnding": "请结合实际主题生成自然的互动结尾。",
+  "riskNotes": []
+}`;
+
 export const youtubeVideoPackageSchema = z.object({
   title: z.string().min(5).max(100),
   titleOptions: z.array(z.string().min(5).max(100)).min(3).max(8),
@@ -156,13 +179,19 @@ function languageInstruction(targetLocale: ContentLocale, uiLocale: UiLocale): s
   return `All publishable fields must be written in ${target}. Risk notes and creator-only operational notes must be written in ${notes}. Preserve JSON field names exactly.`;
 }
 
-function buildSystem(params: PlatformPromptInput, role: string, fields: string): string {
+function buildSystem(
+  params: PlatformPromptInput,
+  role: string,
+  fields: string,
+  outputContract?: string,
+): string {
   return [
     role,
     "Create original work. Never impersonate a referenced creator and never copy source wording.",
     REFERENCE_GUARD_INSTRUCTION,
     languageInstruction(params.targetLocale, params.uiLocale),
     `Return JSON only with these fields: ${fields}.`,
+    outputContract,
     params.skillInstruction ?? "",
   ]
     .filter(Boolean)
@@ -209,6 +238,7 @@ const definitions: Record<ContentKindId, PlatformServerDefinition> = {
           input,
           "You are an expert Xiaohongshu graphic-post editor.",
           "title, titleOptions, coverTextOptions, pages, bodyText, tags, interactionEnding, riskNotes",
+          XHS_OUTPUT_CONTRACT,
         ),
         prompt: contextPrompt(input, "Create a complete Xiaohongshu graphic post with page-by-page structure."),
       };

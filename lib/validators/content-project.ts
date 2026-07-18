@@ -39,6 +39,8 @@ export const createRevisionSchema = z.object({
   bodyText: z.string().max(100000).nullable().optional(),
   structuredContent: z.unknown().optional(),
   fullMarkdown: z.string().max(150000).nullable().optional(),
+  expectedRevisionId: z.string().cuid().optional().nullable(),
+  expectedChecksum: z.string().regex(/^[a-f0-9]{64}$/).optional().nullable(),
 });
 
 /** 恢复版本:客户端只提交来源版本 ID,payload 一律由服务端从该版本读取。 */

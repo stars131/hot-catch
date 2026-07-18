@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BarChart3, Check, CircleAlert, ExternalLink, Loader2, RefreshCw, X } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
@@ -17,28 +18,50 @@ type Availability = { available: true } | { available: false; reason: string; me
 type Retrospective = { id: string; status: "pending" | "drafted"; dueAt: string | null; predictedScore: unknown; actualOutcome: unknown; variance: unknown; conclusions: string | null; ruleProposal: unknown; content: { title: string | null; platform: "xiaohongshu" | "douyin"; scoreSnapshot: unknown }; publishRecord: { publicUrl: string | null; publishedAt: string | null; availability: Availability; metricSnapshots: Snapshot[] } | null; scoringRubric: { name: string; version: number } | null };
 
 export default function RetrospectivesPage() {
-  const [items, setItems] = useState<Retrospective[]>([]);
-  const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [conclusions, setConclusions] = useState<Record<string, string>>({});
+  const queryClient = useQueryClient();
+  const retrospectivesQuery = useQuery({
+    queryKey: ["workspace", "retrospectives", "due"],
+    queryFn: async () => readApiJson<{ retrospectives: Retrospective[] }>(
+      await fetch("/api/retrospectives/due", { cache: "no-store" }),
+    ),
+    staleTime: 2 * 60 * 1000,
+  });
+  const items = retrospectivesQuery.data?.retrospectives ?? [];
+  const loading = retrospectivesQuery.isPending;
 
   const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await readApiJson<{ retrospectives: Retrospective[] }>(await fetch("/api/retrospectives/due", { cache: "no-store" }));
-      setItems(data.retrospectives);
-      setConclusions(Object.fromEntries(data.retrospectives.map((item) => [item.id, item.conclusions ?? ""])));
-    } catch (cause) { toast.error(cause instanceof Error ? cause.message : "复盘加载失败"); }
-    finally { setLoading(false); }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
+    await queryClient.invalidateQueries({ queryKey: ["workspace", "retrospectives", "due"] });
+  }, [queryClient]);
+  useEffect(() => {
+    if (retrospectivesQuery.error) {
+      toast.error(retrospectivesQuery.error instanceof Error ? retrospectivesQuery.error.message : "复盘加载失败");
+    }
+  }, [retrospectivesQuery.error]);
+  useEffect(() => {
+    if (!retrospectivesQuery.data) return;
+    setConclusions((current) => Object.fromEntries(
+      retrospectivesQuery.data.retrospectives.map((item) => [
+        item.id,
+        current[item.id] ?? item.conclusions ?? "",
+      ]),
+    ));
+  }, [retrospectivesQuery.data]);
 
   async function save(item: Retrospective, status: "drafted" | "accepted" | "dismissed") {
     setBusyId(item.id);
     try {
       await readApiJson(await fetch(`/api/retrospectives/${item.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status, conclusions: conclusions[item.id] ?? "" }) }));
-      if (status === "drafted") toast.success("复盘草稿已保存");
-      else { setItems((current) => current.filter((entry) => entry.id !== item.id)); toast.success(status === "accepted" ? "复盘已确认" : "本次规则建议已忽略"); }
+      if (status === "drafted") {
+        toast.success("复盘草稿已保存");
+        await load();
+      } else {
+        queryClient.setQueryData<{ retrospectives: Retrospective[] }>(["workspace", "retrospectives", "due"], (current) => ({
+          retrospectives: (current?.retrospectives ?? []).filter((entry) => entry.id !== item.id),
+        }));
+        toast.success(status === "accepted" ? "复盘已确认" : "本次规则建议已忽略");
+      }
     } catch (cause) { toast.error(cause instanceof Error ? cause.message : "保存失败"); }
     finally { setBusyId(null); }
   }

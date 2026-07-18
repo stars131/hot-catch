@@ -28,7 +28,7 @@ export function OptionCardView(props: {
 
   return (
     <div
-      className="mt-2 max-w-md rounded-xl border border-[#DDD7CE] bg-[#FFFDF9] p-3.5"
+      className="animate-in fade-in slide-in-from-bottom-2 mt-2 max-w-md rounded-xl border border-[#DDD7CE] bg-[#FFFDF9] p-3.5 shadow-[0_8px_24px_rgba(54,47,38,0.055)] duration-300"
       data-testid={`card-option-${props.card.id}`}
       data-state={props.processed ? "disabled" : props.state.phase}
     >
@@ -45,17 +45,17 @@ export function OptionCardView(props: {
               disabled={disabled}
               onClick={() => toggle(option.id)}
               className={cn(
-                "flex w-full items-start gap-2.5 rounded-lg border px-3 py-2 text-left text-sm",
+                "flex w-full items-start gap-2.5 rounded-lg border px-3 py-2 text-left text-sm transition-[background-color,border-color,box-shadow,transform] duration-200",
                 active
-                  ? "border-[#C83B32] bg-[#C83B32]/[0.06]"
-                  : "border-[#DDD7CE] hover:border-[#C8C1B5]",
+                  ? "-translate-y-px border-[#B9C9BD] bg-[#EDF4EE] shadow-[0_4px_12px_rgba(50,75,57,0.10)]"
+                  : "border-[#DDD7CE] hover:-translate-y-px hover:border-[#C8C1B5] hover:bg-[#FAF8F4] hover:shadow-[0_4px_12px_rgba(54,47,38,0.07)]",
                 disabled && "cursor-not-allowed opacity-60",
               )}
             >
               <span
                 className={cn(
                   "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border",
-                  active ? "border-[#C83B32] bg-[#C83B32]" : "border-[#B8B1A6]",
+                  active ? "border-[#66806D] bg-[#66806D]" : "border-[#B8B1A6]",
                 )}
               >
                 {active ? <Check className="h-3 w-3 text-[#FFFDF9]" /> : null}
@@ -88,7 +88,7 @@ export function OptionCardView(props: {
         ) : (
           <Button
             size="sm"
-            className="rounded-lg bg-[#C83B32] text-[#FFFDF9] hover:bg-[#B3352D]"
+            className="rounded-md bg-[#355642] text-white hover:bg-[#294836]"
             disabled={disabled || selected.length === 0}
             onClick={() => props.onSubmit(selected)}
           >

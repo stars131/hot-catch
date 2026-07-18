@@ -16,11 +16,21 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { SkillCatalogItem } from "@/lib/skills/catalog";
+import { Progress } from "@/components/ui/progress";
 
 export type ComposerContextChip = {
   id: string;
-  kind: "idea" | "content" | "patch";
+  kind: "account" | "persona" | "idea" | "content" | "reference" | "patch";
   label: string;
+  entityType?: "social_connection" | "persona" | "idea" | "content" | "benchmark_note";
+};
+
+type MentionItem = {
+  kind: ComposerContextChip["kind"] | "skill";
+  id: string;
+  label: string;
+  description?: string | null;
+  entityType?: ComposerContextChip["entityType"];
 };
 
 const PLATFORM_LABEL = { xiaohongshu: "小红书", douyin: "抖音" } as const;
@@ -35,15 +45,21 @@ export function CreatorComposer(props: {
   onChange: (value: string) => void;
   onSend: () => void;
   onRemoveChip: (id: string) => void;
+  onAddMention: (item: ComposerContextChip) => void;
   onSwitchPlatform: (platform: "xiaohongshu" | "douyin") => void;
   showPlatformSwitcher?: boolean;
   /** 从技能菜单选择内置 Skill(star-skill/v1 manifest 驱动) */
   onPickSkill?: (skill: SkillCatalogItem) => void;
   onToggleSkill: (skillId: string) => void;
+  contextUsage?: { ratio: number; tokens: number; contextWindow: number; checkpointCount: number } | null;
 }) {
   const [plusOpen, setPlusOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [platformOpen, setPlatformOpen] = useState(false);
+  const [mentionItems, setMentionItems] = useState<MentionItem[]>([]);
+  const mentionMatch = props.value.match(/(?:^|\s)([@$])([^\s@$]*)$/);
+  const mentionPrefix = mentionMatch?.[1] ?? null;
+  const mentionQuery = mentionMatch?.[2] ?? null;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const plusButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -91,6 +107,25 @@ export function CreatorComposer(props: {
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, []);
 
+  useEffect(() => {
+    if (!mentionPrefix || mentionQuery === null) {
+      setMentionItems([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({ prefix: mentionPrefix, q: mentionQuery });
+      fetch(`/api/mentions?${params}`, { signal: controller.signal, cache: "no-store" })
+        .then((response) => response.ok ? response.json() : { items: [] })
+        .then((data: { items?: MentionItem[] }) => setMentionItems(data.items ?? []))
+        .catch(() => undefined);
+    }, 120);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [mentionPrefix, mentionQuery]);
+
   // Esc 只关闭菜单并把焦点还给触发按钮,不影响外层(如 Artifact 面板)
   useEffect(() => {
     if (!plusOpen && !platformOpen) return;
@@ -118,7 +153,7 @@ export function CreatorComposer(props: {
               className="inline-flex max-w-full items-center gap-1 rounded-lg border border-[#DDD7CE] bg-[#FFFDF9] py-1 pl-2.5 pr-1 text-xs text-[#1F1D19]"
             >
               <span className="truncate">
-                {chip.kind === "idea" ? "选题:" : chip.kind === "patch" ? "修改:" : "项目:"}
+                {chip.kind === "idea" ? "选题：" : chip.kind === "patch" ? "修改：" : chip.kind === "account" ? "账号：" : chip.kind === "persona" ? "人设：" : chip.kind === "reference" ? "参考：" : "作品："}
                 {chip.label}
               </span>
               <button
@@ -151,7 +186,30 @@ export function CreatorComposer(props: {
         </div>
       ) : null}
 
-      <div className="relative rounded-[22px] border border-[#DDD7CE] bg-[#FFFDF9] shadow-[0_2px_12px_rgba(31,29,25,0.06)]">
+      <div className="relative overflow-visible rounded-lg border border-[#D8D1C7] bg-[#FFFDF9] shadow-[0_2px_10px_rgba(31,29,25,0.05)] transition-[border-color,box-shadow] focus-within:border-[#879C8C] focus-within:shadow-[0_0_0_3px_rgba(102,128,109,0.13),0_5px_18px_rgba(31,29,25,0.07)]">
+        {mentionMatch && mentionItems.length ? (
+          <div className="absolute inset-x-0 bottom-full mb-2 max-h-72 overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-md" role="listbox" aria-label="引用建议">
+            {mentionItems.map((item) => (
+              <button
+                key={`${item.kind}:${item.id}`}
+                type="button"
+                className="flex w-full items-start gap-3 rounded-md px-3 py-2 text-left hover:bg-accent"
+                onClick={() => {
+                  props.onChange(props.value.replace(/(?:^|\s)([@$])([^\s@$]*)$/, "").trimEnd());
+                  if (item.kind === "skill") props.onToggleSkill(item.id);
+                  else if (item.entityType) props.onAddMention({ id: item.id, kind: item.kind, label: item.label, entityType: item.entityType });
+                  setMentionItems([]);
+                  textareaRef.current?.focus();
+                }}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium">{mentionMatch[1]}{item.label}</span>
+                  {item.description ? <span className="block truncate text-xs text-muted-foreground">{item.description}</span> : null}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : null}
         <textarea
           ref={textareaRef}
           value={props.value}
@@ -163,12 +221,12 @@ export function CreatorComposer(props: {
             }
           }}
           rows={1}
-          placeholder="告诉星迹你想创作什么…"
+          placeholder="说说你想创作的主题、素材或修改要求…"
           aria-label="创作输入框"
-          className="block w-full resize-none bg-transparent px-4 pb-12 pt-3.5 text-[15px] leading-6 text-[#1F1D19] outline-none placeholder:text-[#746F67]"
+          className="block min-h-[58px] w-full resize-none bg-transparent px-4 py-3.5 text-[15px] leading-6 text-[#1F1D19] outline-none placeholder:text-[#8B857C] focus-visible:ring-0 focus-visible:ring-offset-0"
         />
 
-        <div className="absolute inset-x-2 bottom-2 flex items-center gap-1">
+        <div className="relative flex min-h-11 items-center gap-1 border-t border-[#ECE7DF] px-2 py-1.5">
           {/* + 菜单:技能来自内置 Skill Registry;未实现能力明确标注,不假装成功 */}
           {props.showPlatformSwitcher !== false ? <div className="relative">
             <Button
@@ -249,7 +307,7 @@ export function CreatorComposer(props: {
                             className={cn(
                               "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border",
                               selected
-                                ? "border-[#C83B32] bg-[#C83B32] text-white"
+                                ? "border-[#66806D] bg-[#66806D] text-white"
                                 : "border-[#C9C2B8]",
                             )}
                           >
@@ -308,7 +366,12 @@ export function CreatorComposer(props: {
           <div className="relative">
             <button
               type="button"
-              className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm text-[#1F1D19] hover:bg-[#EDE9E0]"
+              className={cn(
+                "flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm transition-colors",
+                platformOpen
+                  ? "bg-[#EDF4EE] text-[#476451]"
+                  : "text-[#1F1D19] hover:bg-[#F1EEE8]",
+              )}
               aria-expanded={platformOpen}
               aria-label="选择平台"
               data-testid="platform-switcher"
@@ -328,8 +391,8 @@ export function CreatorComposer(props: {
                       key={platform}
                       type="button"
                       className={cn(
-                        "flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm hover:bg-[#EDE9E0]",
-                        platform === props.platform && "font-medium text-[#C83B32]",
+                        "flex w-full items-center rounded-lg px-2.5 py-2 text-left text-sm hover:bg-[#EDF1EC]",
+                        platform === props.platform && "bg-[#EDF4EE] font-medium text-[#476451]",
                       )}
                       onClick={() => {
                         setPlatformOpen(false);
@@ -338,6 +401,7 @@ export function CreatorComposer(props: {
                     >
                       {PLATFORM_LABEL[platform]}
                       {platform === "xiaohongshu" ? "图文" : "脚本"}
+                      {platform === props.platform ? <Check className="ml-auto h-4 w-4" /> : null}
                     </button>
                   ),
                 )}
@@ -348,7 +412,7 @@ export function CreatorComposer(props: {
           <Button
             type="button"
             size="icon"
-            className="ml-auto rounded-full bg-[#C83B32] text-[#FFFDF9] hover:bg-[#B3352D] disabled:opacity-40"
+            className="ml-auto rounded-full bg-[#355642] text-white shadow-none hover:bg-[#294836] disabled:bg-[#CFCBC3] disabled:text-[#8D887F] disabled:opacity-100"
             disabled={!canSend}
             onClick={props.onSend}
             aria-label="发送"
@@ -361,6 +425,12 @@ export function CreatorComposer(props: {
       <p className="mt-1.5 hidden text-center text-[11px] text-[#67625A] sm:block">
         Enter 发送,Shift+Enter 换行
       </p>
+      {props.contextUsage ? (
+        <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground" title="模型上下文占用">
+          <Progress className="h-1 flex-1" value={Math.round(props.contextUsage.ratio * 100)} />
+          <span>{Math.round(props.contextUsage.ratio * 100)}%{props.contextUsage.checkpointCount ? ` · ${props.contextUsage.checkpointCount} 个检查点` : ""}</span>
+        </div>
+      ) : null}
     </div>
   );
 }

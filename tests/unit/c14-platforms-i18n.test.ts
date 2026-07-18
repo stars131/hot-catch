@@ -11,6 +11,7 @@ import {
   platformSupportsContentKind,
 } from "@/lib/platforms/registry";
 import {
+  getPlatformServerDefinition,
   instagramCarouselSchema,
   redditPostSchema,
   tiktokShortVideoScriptSchema,
@@ -69,6 +70,18 @@ describe("C14 platform registry", () => {
 });
 
 describe("C14 foreign schemas", () => {
+  it("includes an exact Xiaohongshu JSON contract and valid shape example", () => {
+    const prompt = getPlatformServerDefinition("xhs_graphic").buildPrompt({
+      context: { idea: { title: "测试主题" }, persona: null, styleProfile: null, references: [] },
+      targetLocale: "zh-CN",
+      uiLocale: "zh-CN",
+    });
+
+    expect(prompt.system).toContain("pages：3-20 页");
+    expect(prompt.system).toContain('"pageNumber": 1');
+    expect(prompt.system).toContain("bodyText：100-10000 个字符");
+  });
+
   it("enforces the conservative 280-character X post boundary", () => {
     expect(
       xThreadSchema.safeParse({

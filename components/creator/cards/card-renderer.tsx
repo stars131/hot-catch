@@ -19,6 +19,8 @@ import { PatchCardView } from "@/components/creator/cards/patch-card";
 import { PublishReadinessCardView } from "@/components/creator/cards/publish-readiness-card";
 import { CreationSetupCardView } from "@/components/creator/cards/creation-setup-card";
 import { IdeaCandidatesCardView } from "@/components/creator/cards/idea-candidates-card";
+import { DirectionRecommendationCardView } from "@/components/creator/cards/direction-recommendation-card";
+import { DirectionReviewCardView } from "@/components/creator/cards/direction-review-card";
 
 export type CardInvokeState = {
   phase: "idle" | "loading" | "success" | "failed";
@@ -36,6 +38,8 @@ export type InvokeCardAction = (params: {
 function processedActionIds(card: ChatCard, processedKeys: string[]): string[] {
   const candidates: string[] = [];
   if (card.type === "option") candidates.push(card.submitAction.actionId);
+  if (card.type === "direction_recommendation")
+    candidates.push(card.confirmAction.actionId, card.supplementAction.actionId);
   if (card.type === "creation_setup") candidates.push(card.confirmAction.actionId);
   if (card.type === "idea_candidates")
     candidates.push(card.chooseAction.actionId, card.skipAction.actionId);
@@ -94,6 +98,29 @@ export function CardRenderer(props: {
   }
 
   switch (props.card.type) {
+    case "direction_recommendation":
+      return (
+        <DirectionRecommendationCardView
+          card={props.card}
+          state={state}
+          processedActionIds={processed}
+          onConfirm={(selection) => void invoke(props.card.type === "direction_recommendation" ? props.card.confirmAction.actionId : "", {
+            text: JSON.stringify(selection),
+          })}
+          onSupplement={(answers) => void invoke(props.card.type === "direction_recommendation" ? props.card.supplementAction.actionId : "", {
+            text: JSON.stringify({ answers }),
+          })}
+        />
+      );
+    case "direction_review":
+      return (
+        <DirectionReviewCardView
+          card={props.card}
+          state={state}
+          processedActionIds={processed}
+          onInvoke={(actionId) => void invoke(actionId)}
+        />
+      );
     case "idea_candidates":
       return (
         <IdeaCandidatesCardView
@@ -162,7 +189,13 @@ export function CardRenderer(props: {
         />
       );
     case "progress":
-      return <ProgressCardView card={props.card} onSettled={props.onJobSettled} />;
+      return (
+        <ProgressCardView
+          card={props.card}
+          onSettled={props.onJobSettled}
+          onOpenConnections={props.onOpenConnections}
+        />
+      );
     case "reference":
       return (
         <ReferenceCardView

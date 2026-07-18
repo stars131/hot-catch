@@ -143,3 +143,66 @@ export async function cancelJob(userId: string, databaseJobId: string) {
     data: { status: "canceled", canceledAt: new Date(), completedAt: new Date() },
   });
 }
+
+export async function resumeWaitingJob(
+  userId: string,
+  databaseJobId: string,
+  supplementalInstruction?: string,
+) {
+  const databaseJob = await prisma.processingJob.findFirst({
+    where: { id: databaseJobId, userId },
+  });
+  if (!databaseJob) throw new AppError("NOT_FOUND", "任务不存在。", 404);
+  if (databaseJob.status !== "waiting_input") {
+    throw new AppError("CONFLICT", "只有等待补充信息的任务可以继续。", 409);
+  }
+
+  const claimed = await prisma.processingJob.updateMany({
+    where: { id: databaseJob.id, userId, status: "waiting_input" },
+    data: {
+      status: "canceled",
+      stage: "已补充信息，重新排队",
+      canceledAt: new Date(),
+      completedAt: new Date(),
+    },
+  });
+  if (claimed.count !== 1) {
+    throw new AppError("CONFLICT", "任务已被处理，请刷新后查看。", 409);
+  }
+
+  const originalInput = asInputRecord(databaseJob.input);
+  const text = supplementalInstruction?.trim();
+  const nextInput = text
+    ? { ...originalInput, supplementalInstruction: text }
+    : originalInput;
+
+  try {
+    return await enqueueJob({
+      userId,
+      type: databaseJob.type,
+      action: databaseJob.action ?? "retry",
+      input: nextInput as Prisma.InputJsonValue,
+      idempotencyKey: `resume:${databaseJob.id}`,
+      maxAttempts: databaseJob.maxAttempts,
+      parentJobId: databaseJob.id,
+      agentRunId: databaseJob.agentRunId ?? undefined,
+    });
+  } catch (error) {
+    await prisma.processingJob.updateMany({
+      where: { id: databaseJob.id, userId, status: "canceled" },
+      data: {
+        status: "waiting_input",
+        stage: "等待人工补充",
+        canceledAt: null,
+        completedAt: null,
+      },
+    });
+    throw error;
+  }
+}
+
+function asInputRecord(value: Prisma.JsonValue): Record<string, Prisma.JsonValue> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, Prisma.JsonValue>
+    : {};
+}

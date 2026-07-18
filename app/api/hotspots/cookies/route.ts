@@ -28,7 +28,7 @@ const cookieConfigSchema = z.object({
 });
 
 function listCookieSources(store?: UserHotspotCookieStore) {
-  return listHotspotSourceDefinitions(store).filter((source) => source.requiresCookie);
+  return listHotspotSourceDefinitions(store).filter((source) => source.supportsOptionalConnection);
 }
 
 export async function GET() {
@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
       : undefined;
     const source = listCookieSources(existingStore).find((item) => item.code === input.code);
     if (!source) {
-      throw new AppError("NOT_FOUND", "Hotspot source not found or does not use cookies.", 404);
+      throw new AppError("NOT_FOUND", "Hotspot source not found or does not support an optional connection.", 404);
     }
 
     let store = existingStore;

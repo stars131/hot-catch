@@ -4,6 +4,10 @@ import type {
   PlatformId,
   UiLocale,
 } from "@/lib/platforms/registry";
+import type {
+  DirectionRef,
+  DirectionSelection,
+} from "@/lib/creator/creative-direction";
 
 /**
  * star-chat/v1 会话卡片协议的稳定类型定义。
@@ -20,6 +24,8 @@ export const CHAT_PROTOCOL_VERSION = 1 as const;
 
 export type EntityRef =
   | { type: "idea"; id: string }
+  | { type: "social_connection"; id: string }
+  | { type: "persona"; id: string }
   | { type: "benchmark_account"; id: string }
   | { type: "benchmark_note"; id: string }
   | { type: "content"; id: string }
@@ -55,6 +61,11 @@ export type CreationSetupCard = {
   version: 1;
   type: "creation_setup";
   brief: string;
+  directionSelection?: DirectionSelection;
+  directionSummary?: {
+    primaryLabel: string;
+    secondaryLabel?: string;
+  };
   uiLocale: UiLocale;
   maxPlatforms: 5;
   platformOptions: Array<{
@@ -72,9 +83,18 @@ export type CreationSetupCard = {
     label: string;
     description?: string;
   }>;
+  accountOptions: Array<{
+    id: string;
+    platform: PlatformId;
+    label: string;
+    handle?: string;
+    avatarUrl?: string;
+    source: "authorized" | "manual";
+  }>;
   defaultPlatformIds: PlatformId[];
   defaultLocaleId: ContentLocale;
   defaultSkillIds: string[];
+  defaultAccountBindings: Partial<Record<PlatformId, string>>;
   confirmAction: CardAction;
 };
 
@@ -84,6 +104,9 @@ export type IdeaCandidatesCard = {
   type: "idea_candidates";
   brief: string;
   direction: string;
+  directionSelection?: DirectionSelection;
+  primaryDirectionLabel?: string;
+  secondaryDirectionLabel?: string;
   uiLocale: UiLocale;
   candidates: Array<{
     id: string;
@@ -94,6 +117,66 @@ export type IdeaCandidatesCard = {
   }>;
   chooseAction: CardAction;
   skipAction: CardAction;
+};
+
+export type DirectionRecommendationCard = {
+  id: string;
+  version: 1;
+  type: "direction_recommendation";
+  decisionId: string;
+  brief: string;
+  uiLocale: UiLocale;
+  source: "model" | "rules";
+  intentSummary: string;
+  state: "ready" | "needs_input";
+  missingInputs: Array<{
+    key: string;
+    label: string;
+    reason: string;
+    required: boolean;
+    inputType: "text" | "choice";
+    options?: string[];
+  }>;
+  recommendations: Array<{
+    id: string;
+    ref: DirectionRef;
+    label: string;
+    summary: string;
+    category: string;
+    confidence?: number;
+    rationale: string;
+    fitSignals: string[];
+    risks: string[];
+    outlinePreview: string[];
+    suggestedSecondary?: DirectionRef;
+  }>;
+  confirmAction: CardAction;
+  supplementAction: CardAction;
+};
+
+export type DirectionReviewCard = {
+  id: string;
+  version: 1;
+  type: "direction_review";
+  contentId: string;
+  revisionId: string;
+  revisionNumber: number;
+  stage: "generation" | "publish";
+  status: "passed" | "needs_attention" | "unavailable";
+  primaryLabel: string;
+  secondaryLabel?: string;
+  score?: number;
+  summary: string;
+  criteria: Array<{
+    key: string;
+    label: string;
+    score: number;
+    maxScore: number;
+    passed: boolean;
+    reason: string;
+  }>;
+  suggestions: string[];
+  actions: CardAction[];
 };
 
 export type ReferenceCard = {
@@ -197,6 +280,8 @@ export type PatchCard = {
 
 export type ChatCard =
   | OptionCard
+  | DirectionRecommendationCard
+  | DirectionReviewCard
   | CreationSetupCard
   | IdeaCandidatesCard
   | ReferenceCard
@@ -246,6 +331,9 @@ export type ChatMessageMetadataV1 = {
 
 /** 首批 Agent 命令白名单;LLM 决策必须经服务端白名单校验后才能执行。 */
 export const AGENT_COMMANDS = [
+  "direction.analyze",
+  "direction.confirm",
+  "direction.review",
   "reference.import",
   "reference.extract_idea",
   "reference.generate_original",

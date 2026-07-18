@@ -48,7 +48,7 @@ export function NoticeCardView(props: {
                 className={cn(
                   "rounded-lg",
                   action.appearance === "primary" &&
-                    "bg-[#C83B32] text-[#FFFDF9] hover:bg-[#B3352D]",
+                    "bg-[#355642] text-white hover:bg-[#294836]",
                 )}
                 disabled={done || props.state.phase === "loading"}
                 onClick={() => props.onInvoke(action.actionId)}
