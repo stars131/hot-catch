@@ -17,8 +17,14 @@ const config: Config = {
       },
     },
     extend: {
+      fontFamily: {
+        sans: ['"Noto Sans SC"', "system-ui", "sans-serif"],
+        mono: ['"IBM Plex Mono"', "ui-monospace", "monospace"],
+      },
       colors: {
         brand: "#C83B32",
+        canvas: "var(--color-paper)",
+        rail: "var(--color-rail)",
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
@@ -57,6 +63,16 @@ const config: Config = {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+      },
+      boxShadow: {
+        float: "var(--shadow-float)",
+      },
+      transitionTimingFunction: {
+        editorial: "var(--ease-out)",
+      },
+      transitionDuration: {
+        micro: "var(--dur-micro)",
+        short: "var(--dur-short)",
       },
       keyframes: {
         "accordion-down": {

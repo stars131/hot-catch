@@ -346,8 +346,9 @@ test.describe("C7 修改提案(手机 390×844)", () => {
     await expect(patchCard).toBeVisible({ timeout: 30000 });
     await expect(patchCard).toContainText("本地协议预览");
     await assertNoHorizontalOverflow(page, 390);
-    await patchCard.getByTestId("patch-apply").scrollIntoViewIfNeeded();
-    await patchCard.getByTestId("patch-apply").click();
+    const applyButton = page.getByTestId("patch-apply").last();
+    await expect(applyButton).toBeVisible();
+    await applyButton.click();
     await expect(page.getByText(/应用为新版本 v2/)).toBeVisible({ timeout: 30000 });
     await assertNoHorizontalOverflow(page, 390);
   });

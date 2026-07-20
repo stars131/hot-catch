@@ -116,7 +116,7 @@ test.describe("C2 创作壳层(桌面 1440×900)", () => {
     await page.getByRole("button", { name: "添加资料或技能" }).click();
     await expect(page.getByText("上传素材")).toBeVisible();
     await expect(page.getByText("导入链接")).toBeVisible();
-    await expect(page.getByText("技能")).toBeVisible();
+    await expect(page.getByTestId("composer-skills-toggle")).toBeVisible();
     // C7 起「技能」由内置 Skill Registry 驱动,不再是占位;其余两项仍如实标注
     await expect(page.getByText("即将支持")).toHaveCount(2);
     await expect(page.getByRole("button", { name: /上传素材/ })).toBeDisabled();
@@ -128,7 +128,7 @@ test.describe("C2 创作壳层(桌面 1440×900)", () => {
 test.describe("C2 创作壳层(手机 390×844)", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
-  test("单栏无横向溢出,Composer 不被遮挡,持久底部导航可用", async ({ page }) => {
+  test("单栏无横向溢出,Composer 不被遮挡,导航进入 Drawer", async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await page.goto(XHS);
     await expect(page.getByRole("heading", { level: 2, name: "今天想创作什么?" })).toBeVisible();
@@ -142,12 +142,14 @@ test.describe("C2 创作壳层(手机 390×844)", () => {
     const box = (await composer.boundingBox())!;
     expect(box.y + box.height).toBeLessThanOrEqual(844);
 
-    // C15 起工作区移动端保留持久底部导航，切页时创作壳层不再重新挂载。
-    const mobileNav = page.getByRole("navigation", { name: "移动端主导航" });
-    await expect(mobileNav).toBeVisible();
-    await expect(mobileNav.getByText("热点")).toBeVisible();
-    await expect(mobileNav.getByText("编辑")).toBeVisible();
-    await expect(mobileNav.getByText("发布")).toBeVisible();
+    // 创作态不显示会遮挡 Composer 的全局底部导航，主导航收进会话 Drawer。
+    await expect(page.getByRole("navigation", { name: "移动端主导航" })).toHaveCount(0);
+    await page.getByRole("button", { name: "打开会话列表" }).click();
+    const drawerNav = page.getByRole("navigation", { name: "创作工作台主导航" });
+    await expect(drawerNav).toBeVisible();
+    await expect(drawerNav.getByText("热点", { exact: true })).toBeVisible();
+    await expect(drawerNav.getByText("编辑", { exact: true })).toBeVisible();
+    await expect(drawerNav.getByText("发布", { exact: true })).toBeVisible();
     // 桌面限定文案不得出现
     await expect(page.getByText(/右侧内容画布/)).toHaveCount(0);
     expect(errors).toEqual([]);

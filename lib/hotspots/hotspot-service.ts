@@ -58,6 +58,24 @@ export type HotspotPlatformLabel =
 
 export type HotspotStatus = "爆发中" | "上升" | "回落" | "观望";
 
+export type HotspotTrendWindow = "1h" | "24h" | "7d";
+
+export type HotspotTrendEvidence = {
+  dataState: "first_seen" | "observed";
+  window: HotspotTrendWindow;
+  windowHours: number;
+  observationCount: number;
+  firstObservedAt: string;
+  lastObservedAt: string;
+  heatChangePercent: number;
+  rankChange: number | null;
+  observedPeak: number;
+  isNew: boolean;
+  durationLabel: string;
+  status: HotspotStatus;
+  points: number[];
+};
+
 export type HotspotProjectReference = {
   repo: string;
   url: string;
@@ -113,6 +131,8 @@ export type HotspotTopic = {
   creators: string;
   related: number;
   trend: number[];
+  trendEvidence: HotspotTrendEvidence;
+  trendWindows: Record<HotspotTrendWindow, HotspotTrendEvidence>;
   platformShare: Array<{ label: HotspotPlatformLabel; value: number; color: string }>;
   angles: Array<{ title: string; description: string; heat: number; status: HotspotStatus }>;
   riskNotes: string[];
@@ -366,11 +386,11 @@ export const HOTSPOT_PROJECT_REFERENCES: HotspotProjectReference[] = [
     influence: "作为缺少稳定原生公开端点的平台后备，并在结果中明确标注实际后端。",
   },
   {
-    repo: "joyce677/TrendRadar",
-    url: "https://github.com/joyce677/TrendRadar",
+    repo: "sansan0/TrendRadar",
+    url: "https://github.com/sansan0/TrendRadar",
     role: "algorithm",
-    notes: "用配置化平台、权重和报告生成组织热点。",
-    influence: "保留平台权重、跨平台聚类和选题角度生成。",
+    notes: "GPL-3.0 热点监控项目，以时间轴、兴趣筛选、增量模式和报告组织热点。",
+    influence: "参考时间窗口与新增检测的产品概念；星迹使用 PostgreSQL 独立实现，未复制其源码。",
   },
   {
     repo: "tophubs/TopList",
@@ -1377,9 +1397,9 @@ function clusterToTopic(cluster: TopicCluster): HotspotTopic {
   const backendCount = new Set(cluster.items.map((item) => item.backend)).size;
   const scoreBoost = sourceCount > 1 ? 1 + sourceCount * 0.16 : 1 + Math.min(backendCount, 4) * 0.05;
   const heat = clamp(Math.round(logScale(cluster.score * scoreBoost, 1_000, 12_000_000, 42, 99)), 36, 99);
-  const change = Math.round((heat - 52) * 1.7 + sourceCount * 11 + backendCount * 4 - Math.min(topItem.rank, 20) * 0.7);
-  const status = inferStatus(heat, sourceCount, change);
-  const trend = buildTrend(heat, change, cluster.id);
+  const trendWindows = createInitialTrendWindows(heat);
+  const trendEvidence = trendWindows["24h"];
+  const status = trendEvidence.status;
 
   return {
     id: cluster.id,
@@ -1387,15 +1407,17 @@ function clusterToTopic(cluster: TopicCluster): HotspotTopic {
     category: inferCategory(cluster, topItem.platformCode),
     platform: topItem.platform,
     heat,
-    change,
+    change: trendEvidence.heatChangePercent,
     status,
-    predictedPeak: clamp(Math.round(heat + Math.max(8, sourceCount * 7 + Math.abs(change) * 0.18)), heat, 128),
-    peakEta: sourceCount > 1 ? "2-4 小时内继续扩散" : heat > 78 ? "4-8 小时内观察" : "适合长尾跟进",
+    predictedPeak: trendEvidence.observedPeak,
+    peakEta: trendEvidence.durationLabel,
     notes: cluster.items.length,
     engagement: formatEngagement(cluster.items.reduce((sum, item) => sum + item.score, 0)),
     creators: `${sourceCount} 个平台 / ${backendCount} 个后端`,
     related: cluster.keywords.length,
-    trend,
+    trend: trendEvidence.points,
+    trendEvidence,
+    trendWindows,
     platformShare: buildPlatformShare(cluster.items),
     angles: buildAngles(cluster.title, inferCategory(cluster, topItem.platformCode), heat, status),
     riskNotes: buildRiskNotes(cluster),
@@ -1472,18 +1494,34 @@ function buildPlatformShare(items: HotspotSourceItem[]) {
     }));
 }
 
-function buildTrend(heat: number, change: number, seed: string) {
-  const base = clamp(heat - Math.max(12, Math.abs(change) * 0.36), 22, 86);
-  const rng = seededRandom(hashNumber(seed));
-  const points: number[] = [];
-  for (let index = 0; index < 18; index += 1) {
-    const progress = index / 17;
-    const drift = change >= 0 ? progress * Math.min(32, Math.abs(change) * 0.42) : -progress * Math.min(20, Math.abs(change) * 0.32);
-    const wave = Math.sin(progress * Math.PI * 2.2) * 4 + (rng() - 0.5) * 7;
-    points.push(clamp(Math.round(base + drift + wave), 10, 132));
-  }
-  points[points.length - 1] = heat;
-  return points;
+function createInitialTrendWindows(
+  heat: number,
+): Record<HotspotTrendWindow, HotspotTrendEvidence> {
+  const observedAt = new Date().toISOString();
+  const create = (
+    window: HotspotTrendWindow,
+    windowHours: number,
+  ): HotspotTrendEvidence => ({
+    dataState: "first_seen",
+    window,
+    windowHours,
+    observationCount: 1,
+    firstObservedAt: observedAt,
+    lastObservedAt: observedAt,
+    heatChangePercent: 0,
+    rankChange: null,
+    observedPeak: heat,
+    isNew: true,
+    durationLabel: "首次记录",
+    status: "观望",
+    points: [heat],
+  });
+
+  return {
+    "1h": create("1h", 1),
+    "24h": create("24h", 24),
+    "7d": create("7d", 24 * 7),
+  };
 }
 
 function extractKeywords(text: string) {
@@ -1523,13 +1561,6 @@ function inferCategory(cluster: TopicCluster, fallbackCode: HotspotPlatformCode)
   if (/穿搭|美妆|护肤|旅游|城市|早餐|家居|消费|小红书/.test(text)) return "生活方式";
   if (/足球|篮球|nba|cba|英超|虎扑/i.test(text)) return "体育赛事";
   return getSource(fallbackCode).category;
-}
-
-function inferStatus(heat: number, sourceCount: number, change: number): HotspotStatus {
-  if (heat >= 88 || sourceCount >= 3) return "爆发中";
-  if (change >= 18 || heat >= 68) return "上升";
-  if (change < -8) return "回落";
-  return "观望";
 }
 
 function parseScore(value: string) {
@@ -1599,14 +1630,6 @@ function hashNumber(text: string) {
     hash = (hash * 33) ^ text.charCodeAt(index);
   }
   return hash;
-}
-
-function seededRandom(seed: number) {
-  let value = seed || 1;
-  return () => {
-    value = (value * 1664525 + 1013904223) % 4294967296;
-    return value / 4294967296;
-  };
 }
 
 function toSourceDefinition(

@@ -7,6 +7,7 @@ import {
   type HotspotTopic,
 } from "@/lib/hotspots/hotspot-service";
 import { loadUserHotspotCookieStore } from "@/lib/hotspots/user-cookie-store";
+import { enrichHotspotPayloadWithHistory } from "@/lib/hotspots/trend-history-service";
 import { prisma } from "@/lib/prisma";
 import { createLlmProvider } from "@/lib/providers/factory";
 
@@ -59,10 +60,14 @@ export async function analyzeHotspots(
 ) {
   const input = analyzeInputSchema.parse(untrustedInput);
   const requestedIds = Array.from(new Set(input.topicIds));
-  const payload = await getHotspotPayload({
-    limit: 60,
-    credentialStore: await loadUserHotspotCookieStore(userId),
-  });
+  const payload = await enrichHotspotPayloadWithHistory(
+    userId,
+    await getHotspotPayload({
+      limit: 60,
+      credentialStore: await loadUserHotspotCookieStore(userId),
+    }),
+    { record: false },
+  );
   const byId = new Map(payload.topics.map((topic) => [topic.id, topic]));
   const topics = requestedIds
     .map((id) => byId.get(id))
@@ -93,7 +98,7 @@ export async function analyzeHotspots(
   if (missing.length) {
     const output = await provider.generateStructured({
       system: [
-        "你是内容研究编辑。只根据输入中的真实来源、排名、热度、变化和标题做判断。",
+        "你是内容研究编辑。只根据输入中的真实来源、排名、已观测热度、变化和标题做判断。",
         "不要补充未提供的事实，不要把平台热度当作绝对流量，不要承诺传播结果。",
         "relevanceScore 衡量内容创作者可切入程度；opportunityScore 综合时机、跨平台证据和可差异化程度；saturationScore 衡量同质化风险。",
         "evidence 必须引用输入里可核对的信息，recommendation 必须是可执行建议。只返回符合 Schema 的 JSON。",
@@ -176,8 +181,16 @@ function prepareTopic(topic: HotspotTopic, providerName: string, modelName: stri
     heat: topic.heat,
     change: topic.change,
     status: topic.status,
-    predictedPeak: topic.predictedPeak,
-    peakEta: topic.peakEta,
+    trendEvidence: {
+      window: topic.trendEvidence.window,
+      observationCount: topic.trendEvidence.observationCount,
+      firstObservedAt: topic.trendEvidence.firstObservedAt,
+      lastObservedHour: topic.trendEvidence.lastObservedAt.slice(0, 13),
+      heatChangePercent: topic.trendEvidence.heatChangePercent,
+      rankChange: topic.trendEvidence.rankChange,
+      observedPeak: topic.trendEvidence.observedPeak,
+      isNew: topic.trendEvidence.isNew,
+    },
     keywords: topic.keywords,
     riskNotes: topic.riskNotes,
     existingAngles: topic.angles,

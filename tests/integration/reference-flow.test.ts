@@ -102,7 +102,12 @@ beforeAll(async () => {
   convAId = conversation.id;
 });
 
-afterEach(() => server.resetHandlers());
+afterEach(async () => {
+  server.resetHandlers();
+  await prisma.providerCredential.deleteMany({
+    where: { userId: userBId, provider: CredentialProvider.firecrawl },
+  });
+});
 
 afterAll(async () => {
   server.close();
@@ -301,6 +306,83 @@ describe("普通网页:基础抓取兜底与去重", () => {
     // 注入文本只是被保存的数据
     expect(ideas[0].notes).toContain("Ignore all previous instructions");
     expect(ideas[0].notes).not.toContain("<script>");
+  });
+
+  it("Firecrawl 失败时继续安全基础抓取,并记录后端尝试与实际来源", async () => {
+    const webUrl = "http://web.test/firecrawl-fallback";
+    await saveCredential(userBId, CredentialProvider.firecrawl, {
+      apiKey: `fc-${runId}`,
+      baseUrl: "https://firecrawl.test",
+    });
+    server.use(
+      http.post("https://firecrawl.test/v2/scrape", () =>
+        HttpResponse.json(
+          { error: "raw upstream detail that must not be persisted" },
+          { status: 503 },
+        ),
+      ),
+      http.get(webUrl, () => HttpResponse.html(articleHtml)),
+    );
+
+    const imported = await runImport(userBId, webUrl);
+    expect(imported.result.resultType).toBe("idea");
+    expect(imported.result.output).toEqual({
+      activeBackend: "basic_fetch",
+      fallbackUsed: true,
+    });
+
+    const idea = await prisma.idea.findUnique({ where: { id: imported.result.resultId! } });
+    const evidence = idea!.evidence as Record<string, unknown>;
+    const metadata = evidence.metadata as Record<string, unknown>;
+    expect(evidence.importedBy).toBe("basic_fetch");
+    expect(metadata.sourceRoute).toEqual({
+      activeBackend: "basic_fetch",
+      attempts: [
+        { backend: "firecrawl", status: "failed", reason: "PROVIDER_UNAVAILABLE" },
+        {
+          backend: "agent_reach_web",
+          status: "skipped",
+          reason: "AGENT_REACH_DISABLED",
+        },
+        { backend: "basic_fetch", status: "succeeded" },
+      ],
+    });
+    expect(JSON.stringify(evidence)).not.toContain("raw upstream detail");
+  });
+
+  it("Firecrawl 成功时保持首选后端,不调用基础抓取", async () => {
+    const webUrl = "http://web.test/firecrawl-primary";
+    let basicFetchCount = 0;
+    await saveCredential(userBId, CredentialProvider.firecrawl, {
+      apiKey: `fc-primary-${runId}`,
+      baseUrl: "https://firecrawl.test",
+    });
+    server.use(
+      http.post("https://firecrawl.test/v2/scrape", () =>
+        HttpResponse.json({
+          data: {
+            markdown: "# Firecrawl 主路径\n\n这段正文来自脱敏契约响应。",
+            metadata: { title: "Firecrawl 主路径" },
+          },
+        }),
+      ),
+      http.get(webUrl, () => {
+        basicFetchCount += 1;
+        return HttpResponse.html(articleHtml);
+      }),
+    );
+
+    const imported = await runImport(userBId, webUrl);
+    expect(imported.result.output).toEqual({
+      activeBackend: "firecrawl",
+      fallbackUsed: false,
+    });
+    expect(basicFetchCount).toBe(0);
+
+    const idea = await prisma.idea.findUnique({ where: { id: imported.result.resultId! } });
+    const evidence = idea!.evidence as Record<string, unknown>;
+    expect(evidence.importedBy).toBe("firecrawl");
+    expect(idea!.notes).toContain("Firecrawl 主路径");
   });
 
   it("SSRF:导入处理器拒绝私网链接", async () => {

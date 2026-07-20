@@ -9,6 +9,7 @@ import {
   CircleAlert,
   Flame,
   Loader2,
+  Minus,
   RefreshCw,
   Save,
   Sparkles,
@@ -39,16 +40,23 @@ import type {
   HotspotSourceDefinition,
   HotspotSourceHealth,
   HotspotTopic,
+  HotspotTrendWindow,
 } from "@/lib/hotspots/hotspot-service";
 import {
   HOTSPOT_BROWSER_CACHE_MS,
   readHotspotBrowserCache,
   writeHotspotBrowserCache,
 } from "@/lib/hotspots/browser-cache";
+import { selectHotspotTrendWindow } from "@/lib/hotspots/trend-evidence";
 
 type WindowValue = "1小时" | "24小时" | "7天";
 
 const WINDOWS: WindowValue[] = ["1小时", "24小时", "7天"];
+const WINDOW_KEYS: Record<WindowValue, HotspotTrendWindow> = {
+  "1小时": "1h",
+  "24小时": "24h",
+  "7天": "7d",
+};
 const TECH_SOURCE_CODES = new Set(["github", "hackernews", "juejin", "sspai", "v2ex", "hellogithub", "ithome", "36kr"]);
 
 type HotspotAiInsightView = {
@@ -126,7 +134,9 @@ export default function HotspotsPage() {
   }, [load]);
 
   const topics = useMemo(() => {
-    const all = payload?.topics ?? [];
+    const all = (payload?.topics ?? []).map((topic) =>
+      selectHotspotTrendWindow(topic, WINDOW_KEYS[windowValue]),
+    );
     const filtered = platform === "全平台"
       ? all
       : platform === "技术圈"
@@ -139,7 +149,7 @@ export default function HotspotsPage() {
     return [...filtered].sort(
       (left, right) => (scoreByTopic.get(right.id) ?? -1) - (scoreByTopic.get(left.id) ?? -1),
     );
-  }, [payload?.topics, platform, insights]);
+  }, [payload?.topics, platform, insights, windowValue]);
 
   const selected = topics.find((topic) => topic.id === selectedId) ?? topics[0] ?? null;
   const insightByTopic = useMemo(
@@ -317,7 +327,7 @@ export default function HotspotsPage() {
                 <div className="hidden overflow-hidden rounded-lg border md:block">
                   <table className="w-full text-left text-sm">
                     <thead className="bg-muted/60 text-xs text-muted-foreground">
-                      <tr><th className="px-4 py-3 font-medium">话题</th><th className="px-4 py-3 font-medium">平台</th><th className="px-4 py-3 font-medium">热度</th><th className="px-4 py-3 font-medium">变化</th><th className="px-4 py-3 font-medium">状态</th><th className="w-12" /></tr>
+                      <tr><th className="px-4 py-3 font-medium">话题</th><th className="px-4 py-3 font-medium">平台</th><th className="px-4 py-3 font-medium">热度</th><th className="px-4 py-3 font-medium">{windowValue}变化</th><th className="px-4 py-3 font-medium">状态</th><th className="w-12" /></tr>
                     </thead>
                     <tbody className="divide-y">
                       {topics.map((topic) => <TopicRow key={topic.id} topic={topic} insight={insightByTopic.get(topic.id)} active={selected?.id === topic.id} onSelect={() => setSelectedId(topic.id)} />)}
@@ -336,7 +346,7 @@ export default function HotspotsPage() {
           <Card className="hidden md:block">
             <CardHeader>
               <div className="flex items-start justify-between gap-6">
-                <div><div className="mb-2 flex items-center gap-2"><Badge variant="outline">{selected.platform}</Badge><StatusBadge status={selected.status} /></div><CardTitle className="text-xl">{selected.title}</CardTitle><CardDescription>{selected.category} · 预计峰值 {selected.peakEta}</CardDescription></div>
+                <div><div className="mb-2 flex items-center gap-2"><Badge variant="outline">{selected.platform}</Badge><StatusBadge status={selected.status} /></div><CardTitle className="text-xl">{selected.title}</CardTitle><CardDescription>{selected.category} · {selected.trendEvidence.durationLabel} · {selected.trendEvidence.observationCount} 次观测</CardDescription></div>
                 <Button onClick={() => void collect(selected)} disabled={collectingId === selected.id}>{collectingId === selected.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bookmark className="h-4 w-4" />}收藏到选题库</Button>
               </div>
             </CardHeader>
@@ -347,6 +357,7 @@ export default function HotspotsPage() {
                 <div className="space-y-3">{selected.angles.map((angle) => <div key={angle.title} className="rounded-lg border bg-muted/25 p-4"><div className="flex items-center justify-between gap-4"><p className="font-medium">{angle.title}</p><span className="font-mono text-sm text-brand">{angle.heat}</span></div><p className="mt-2 text-sm leading-6 text-muted-foreground">{angle.description}</p></div>)}</div>
               </div>
               <div className="space-y-4">
+                <TrendEvidencePanel topic={selected} />
                 <EvidencePanel topic={selected} />
                 {selected.riskNotes.length ? <div className="rounded-lg border border-amber-200 bg-amber-50 p-4"><p className="text-sm font-semibold text-amber-950">表达风险</p><ul className="mt-2 space-y-1 text-xs leading-5 text-amber-900">{selected.riskNotes.map((risk) => <li key={risk}>· {risk}</li>)}</ul></div> : null}
               </div>
@@ -379,11 +390,22 @@ function PlatformFilters({ values, value, onChange }: { values: string[]; value:
 }
 
 function TopicRow({ topic, insight, active, onSelect }: { topic: HotspotTopic; insight?: HotspotAiInsightView; active: boolean; onSelect: () => void }) {
-  return <tr onClick={onSelect} className={cn("cursor-pointer transition-colors hover:bg-muted/40", active && "bg-brand/[0.04]")}><td className="px-4 py-3"><p className="font-medium text-foreground">{topic.title}</p><p className="mt-1 text-xs text-muted-foreground">{topic.category} · {topic.sources.length} 个来源{insight ? ` · AI 机会 ${insight.opportunityScore}` : ""}</p></td><td className="px-4 py-3 text-muted-foreground">{topic.platform}</td><td className="px-4 py-3 font-mono font-medium">{topic.heat.toFixed(1)}</td><td className={cn("px-4 py-3 font-mono text-xs", topic.change >= 0 ? "text-emerald-700" : "text-red-700")}>{topic.change >= 0 ? "+" : ""}{topic.change}%</td><td className="px-4 py-3"><StatusBadge status={topic.status} /></td><td><ChevronRight className="h-4 w-4 text-muted-foreground" /></td></tr>;
+  return <tr onClick={onSelect} className={cn("cursor-pointer transition-colors hover:bg-muted/40", active && "bg-brand/[0.04]")}><td className="px-4 py-3"><p className="font-medium text-foreground">{topic.title}</p><p className="mt-1 text-xs text-muted-foreground">{topic.category} · {topic.sources.length} 个来源{insight ? ` · AI 机会 ${insight.opportunityScore}` : ""}</p></td><td className="px-4 py-3 text-muted-foreground">{topic.platform}</td><td className="px-4 py-3 font-mono font-medium">{topic.heat.toFixed(1)}</td><td className="px-4 py-3"><TrendDelta topic={topic} /></td><td className="px-4 py-3"><StatusBadge status={topic.status} /></td><td><ChevronRight className="h-4 w-4 text-muted-foreground" /></td></tr>;
 }
 
 function TopicCard({ topic, insight, active, onSelect, onCollect, collecting }: { topic: HotspotTopic; insight?: HotspotAiInsightView; active: boolean; onSelect: () => void; onCollect: () => void; collecting: boolean }) {
-  return <article className={cn("rounded-xl border bg-card p-4", active && "border-brand/50")}><button type="button" className="w-full text-left" onClick={onSelect}><div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="mb-2 flex items-center gap-2"><Badge variant="outline">{topic.platform}</Badge><StatusBadge status={topic.status} /></div><h3 className="font-semibold leading-6">{topic.title}</h3><p className="mt-1 text-xs text-muted-foreground">{topic.category} · {topic.sources.length} 个来源{insight ? ` · AI 机会 ${insight.opportunityScore}` : ""}</p></div><div className="shrink-0 text-right"><p className="font-mono text-xl">{topic.heat.toFixed(1)}</p><p className={cn("mt-1 flex items-center justify-end gap-1 text-xs", topic.change >= 0 ? "text-emerald-700" : "text-red-700")}>{topic.change >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}{Math.abs(topic.change)}%</p></div></div></button>{active ? <div className="mt-4 border-t pt-4">{insight ? <p className="mb-2 rounded-md bg-violet-50 p-2 text-xs leading-5 text-violet-900">{insight.recommendation}</p> : null}<p className="text-sm font-medium">{topic.angles[0]?.title ?? "值得继续观察"}</p><p className="mt-1 line-clamp-3 text-xs leading-5 text-muted-foreground">{topic.angles[0]?.description ?? topic.keywords.join("、")}</p><Button className="mt-4 w-full" onClick={onCollect} disabled={collecting}>{collecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bookmark className="h-4 w-4" />}收藏到选题库</Button></div> : null}</article>;
+  return <article className={cn("rounded-xl border bg-card p-4", active && "border-brand/50")}><button type="button" className="w-full text-left" onClick={onSelect}><div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="mb-2 flex items-center gap-2"><Badge variant="outline">{topic.platform}</Badge><StatusBadge status={topic.status} /></div><h3 className="font-semibold leading-6">{topic.title}</h3><p className="mt-1 text-xs text-muted-foreground">{topic.category} · {topic.sources.length} 个来源{insight ? ` · AI 机会 ${insight.opportunityScore}` : ""}</p></div><div className="shrink-0 text-right"><p className="font-mono text-xl">{topic.heat.toFixed(1)}</p><TrendDelta topic={topic} className="mt-1 justify-end" /></div></div></button>{active ? <div className="mt-4 border-t pt-4">{insight ? <p className="mb-2 rounded-md bg-violet-50 p-2 text-xs leading-5 text-violet-900">{insight.recommendation}</p> : null}<p className="text-sm font-medium">{topic.angles[0]?.title ?? "值得继续观察"}</p><p className="mt-1 line-clamp-3 text-xs leading-5 text-muted-foreground">{topic.angles[0]?.description ?? topic.keywords.join("、")}</p><Button className="mt-4 w-full" onClick={onCollect} disabled={collecting}>{collecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bookmark className="h-4 w-4" />}收藏到选题库</Button></div> : null}</article>;
+}
+
+function TrendDelta({ topic, className }: { topic: HotspotTopic; className?: string }) {
+  if (topic.trendEvidence.dataState === "first_seen") {
+    return <span className={cn("inline-flex items-center gap-1 text-xs text-muted-foreground", className)}><Minus className="h-3 w-3" />{topic.trendEvidence.isNew ? "新收录" : "等待对比"}</span>;
+  }
+  if (topic.change === 0) {
+    return <span className={cn("inline-flex items-center gap-1 font-mono text-xs text-muted-foreground", className)}><Minus className="h-3 w-3" />持平</span>;
+  }
+  const rising = topic.change > 0;
+  return <span className={cn("inline-flex items-center gap-1 font-mono text-xs", rising ? "text-emerald-700" : "text-red-700", className)}>{rising ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}{rising ? "+" : ""}{topic.change}%</span>;
 }
 
 function AiInsightPanel({ insight }: { insight: HotspotAiInsightView }) {
@@ -403,6 +425,18 @@ function StatusBadge({ status }: { status: HotspotTopic["status"] }) {
 
 function EvidencePanel({ topic }: { topic: HotspotTopic }) {
   return <div className="rounded-lg border p-4"><p className="text-sm font-semibold">来源证据</p><div className="mt-3 space-y-2">{topic.sources.slice(0, 5).map((source) => <a key={`${source.platformCode}-${source.id}`} href={source.url} target="_blank" rel="noreferrer" className="block rounded-md bg-muted/40 px-3 py-2 text-xs hover:bg-muted"><span className="font-medium">{source.platform} #{source.rank}</span><span className="ml-2 text-muted-foreground">{source.title}</span></a>)}</div></div>;
+}
+
+function TrendEvidencePanel({ topic }: { topic: HotspotTopic }) {
+  const evidence = topic.trendEvidence;
+  const rankChange = evidence.rankChange == null
+    ? "等待对比"
+    : evidence.rankChange === 0
+      ? "持平"
+      : evidence.rankChange > 0
+        ? `上升 ${evidence.rankChange} 位`
+        : `下降 ${Math.abs(evidence.rankChange)} 位`;
+  return <div className="rounded-lg border p-4"><p className="text-sm font-semibold">趋势证据</p><dl className="mt-3 grid grid-cols-2 gap-3 text-xs"><div><dt className="text-muted-foreground">观测窗口</dt><dd className="mt-1 font-medium">{evidence.window === "1h" ? "1 小时" : evidence.window === "24h" ? "24 小时" : "7 天"}</dd></div><div><dt className="text-muted-foreground">记录次数</dt><dd className="mt-1 font-mono font-medium">{evidence.observationCount}</dd></div><div><dt className="text-muted-foreground">已观测峰值</dt><dd className="mt-1 font-mono font-medium">{evidence.observedPeak.toFixed(1)}</dd></div><div><dt className="text-muted-foreground">榜单名次</dt><dd className="mt-1 font-medium">{rankChange}</dd></div></dl><p className="mt-3 text-xs leading-5 text-muted-foreground">首见于 {new Date(evidence.firstObservedAt).toLocaleString("zh-CN")}；变化仅根据星迹保存的历史快照计算。</p></div>;
 }
 
 function SourceHealthList({ sources, onConfigure }: { sources: HotspotSourceHealth[]; onConfigure: (code: string) => void }) {

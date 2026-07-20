@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   AlertCircle,
+  ArrowRight,
   CircleStop,
   Import,
   Lightbulb,
@@ -13,6 +14,7 @@ import {
   Video,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { scrollFollowState, type ScrollFollowState } from "@/lib/conversations/scroll-follow";
 import type {
@@ -107,12 +109,12 @@ export function ConversationThread(props: {
 
   if (props.state === "loading") {
     return (
-      <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-8">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 py-8">
         {[0, 1, 2].map((item) => (
-          <div
+          <Skeleton
             key={item}
             className={cn(
-              "h-16 animate-pulse rounded-xl bg-[#EDE9E0]",
+              "h-16 rounded-lg",
               item % 2 === 1 ? "ml-auto w-2/3" : "w-5/6",
             )}
           />
@@ -124,13 +126,13 @@ export function ConversationThread(props: {
   if (props.state === "error") {
     return (
       <div className="mx-auto flex w-full max-w-md flex-col items-center px-4 py-20 text-center">
-        <AlertCircle className="h-8 w-8 text-[#C83B32]" />
+        <AlertCircle className="size-8 text-primary" />
         <h2 className="mt-4 text-lg font-semibold">无法打开这个会话</h2>
-        <p className="mt-2 text-sm leading-6 text-[#746F67]">
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
           {props.errorMessage ?? "会话不存在,或不属于当前账号。"}
         </p>
         <Button
-          className="mt-6 rounded-md bg-[#355642] text-white hover:bg-[#294836]"
+          className="mt-6"
           onClick={props.onStartNew}
         >
           新建创作会话
@@ -141,29 +143,38 @@ export function ConversationThread(props: {
 
   if (props.state === "empty") {
     return (
-      <div className="mx-auto flex w-full max-w-2xl flex-col justify-center px-4 py-16 min-h-full">
-        <h2 className="text-center text-2xl font-semibold tracking-tight">
+      <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col justify-center px-5 py-12 sm:px-8 sm:py-16">
+        <div className="max-w-2xl">
+        <h2 className="text-balance text-[28px] font-semibold leading-tight tracking-[-0.035em] sm:text-[32px]">
           今天想创作什么?
         </h2>
-        <p className="mt-2 text-center text-sm text-[#67625A]">
-          直接描述你的想法,或从下面的入口开始。
+        <div className="mt-4 h-0.5 w-10 bg-primary" aria-hidden="true" />
+        <p className="text-pretty mt-4 max-w-[56ch] text-sm leading-6 text-muted-foreground">
+          把灵感、链接或草稿交给星迹，从一个具体动作开始。
         </p>
-        <div className="mt-8 grid gap-2 sm:grid-cols-2">
-          {props.quickEntries.map((entry) => {
+        </div>
+        <div className="mt-10 grid grid-cols-2 sm:mt-12">
+          {props.quickEntries.map((entry, index) => {
             const Icon = QUICK_ICONS[entry.icon];
             return (
               <button
                 key={entry.id}
                 type="button"
                 onClick={() => props.onQuickEntry(entry)}
-                className="flex items-start gap-3 rounded-xl border border-[#DDD7CE] bg-[#FFFDF9] p-3.5 text-left hover:border-[#C8C1B5]"
+                className="group flex min-h-28 min-w-0 flex-col justify-between border-t px-3 py-4 text-left transition-[background-color,color,transform] duration-short ease-editorial even:border-l hover:bg-card/60 active:translate-y-px sm:min-h-32 sm:px-5"
               >
-                <Icon className="mt-0.5 h-4 w-4 shrink-0 text-[#C83B32]" />
-                <span className="min-w-0">
-                  <span className="block text-sm font-medium">{entry.label}</span>
-                  <span className="mt-0.5 block text-xs leading-5 text-[#746F67]">
+                <span className="font-mono-metric text-[10px] text-primary">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <span className="flex min-w-0 items-center gap-2">
+                  <Icon className="hidden size-4 shrink-0 text-primary sm:block" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block whitespace-nowrap text-[13px] font-medium sm:text-sm">{entry.label}</span>
+                    <span className="mt-1 hidden text-xs leading-5 text-muted-foreground sm:block">
                     {entry.hint}
                   </span>
+                  </span>
+                  <ArrowRight className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-short ease-editorial group-hover:translate-x-0.5" />
                 </span>
               </button>
             );
@@ -174,7 +185,7 @@ export function ConversationThread(props: {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-4 py-6">
+    <div className="mx-auto w-full max-w-3xl px-4 py-8">
       <ul
         className="relative"
         aria-live="polite"
@@ -193,7 +204,7 @@ export function ConversationThread(props: {
             style={{ transform: `translateY(${item.start}px)` }}
           >
             {message.role === "user" ? (
-              <div className="ml-auto w-fit max-w-[85%] rounded-xl bg-[#EDE9E0] px-3.5 py-2.5 text-[15px] leading-7">
+              <div className="ml-auto w-fit max-w-[85%] rounded-lg bg-muted px-3.5 py-2.5 text-[15px] leading-7">
                 {message.content}
               </div>
             ) : (
