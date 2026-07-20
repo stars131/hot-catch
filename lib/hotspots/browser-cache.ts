@@ -1,6 +1,6 @@
 import type { HotspotPayload } from "@/lib/hotspots/hotspot-service";
 
-export const HOTSPOT_BROWSER_CACHE_KEY = "startrace:hotspots:v1";
+export const HOTSPOT_BROWSER_CACHE_KEY = "startrace:hotspots:v2";
 export const HOTSPOT_BROWSER_CACHE_MS = 30 * 60 * 1000;
 
 export type HotspotBrowserCache = {

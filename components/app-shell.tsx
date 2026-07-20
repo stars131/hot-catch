@@ -20,14 +20,14 @@ export function AppShell({
 }: AppShellProps) {
   return (
     <div className="min-h-dvh bg-background">
-      <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
-        <div className="flex min-h-[72px] items-center gap-4 px-4 sm:px-6 lg:px-8">
+      <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur-md">
+        <div className="mx-auto flex min-h-20 max-w-[1600px] items-center gap-4 px-4 sm:px-6 lg:px-10">
           <div className="min-w-0 flex-1">
             <p className="editorial-label truncate">{eyebrow}</p>
-            <div className="mt-1 flex min-w-0 items-baseline gap-3">
-              <h1 className="truncate text-xl font-semibold tracking-tight sm:text-2xl">{title}</h1>
+            <div className="mt-1.5 flex min-w-0 items-baseline gap-4">
+              <h1 className="truncate text-xl font-semibold tracking-[-0.025em] sm:text-[26px]">{title}</h1>
               {description ? (
-                <p className="hidden truncate text-sm text-muted-foreground md:block">{description}</p>
+                <p className="hidden max-w-[56ch] truncate text-sm text-muted-foreground md:block">{description}</p>
               ) : null}
             </div>
           </div>
@@ -38,7 +38,7 @@ export function AppShell({
         </div>
       </header>
 
-      <main className={cn("min-w-0 px-4 pb-24 pt-5 sm:px-6 lg:px-8 lg:pb-8", contentClassName)}>
+      <main className={cn("mx-auto min-w-0 max-w-[1600px] px-4 pb-24 pt-7 sm:px-6 lg:px-10 lg:pb-10", contentClassName)}>
         {children}
       </main>
     </div>

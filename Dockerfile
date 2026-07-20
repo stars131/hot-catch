@@ -37,8 +37,17 @@ EXPOSE 3000
 CMD ["node", "server.js"]
 
 FROM dependencies AS worker
+COPY deploy/agent-reach-constraints.txt /tmp/agent-reach-constraints.txt
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 python3-venv \
+  && python3 -m venv /opt/agent-reach \
+  && /opt/agent-reach/bin/pip install --no-cache-dir \
+    -c /tmp/agent-reach-constraints.txt \
+    https://github.com/Panniantong/Agent-Reach/archive/1494c2ab239e7355a77e7cceaf3271453a1f34b5.zip \
+  && rm -rf /var/lib/apt/lists/* /tmp/agent-reach-constraints.txt
 COPY --chown=node:node . .
 ENV NODE_ENV=production
+ENV PATH="/opt/agent-reach/bin:${PATH}"
 RUN mkdir -p /tmp/startrace && chown -R node:node /tmp/startrace
 USER node
 CMD ["npm", "run", "worker"]

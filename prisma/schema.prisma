@@ -358,6 +358,8 @@ model User {
   contentReferences      ContentReference[]
   customSkills           UserSkill[]
   hotspotAiInsights      HotspotAiInsight[]
+  hotspotTrendTopics     HotspotTrendTopic[]
+  hotspotTrendSnapshots  HotspotTrendObservation[]
   socialConnections      SocialConnection[]
   trackedPublications    TrackedPublication[]
   trackedMetrics         TrackedMetricSnapshot[]
@@ -1049,6 +1051,49 @@ model HotspotAiInsight {
   @@unique([userId, fingerprint, promptVersion])
   @@index([userId, updatedAt])
   @@index([userId, opportunityScore, updatedAt])
+}
+
+model HotspotTrendTopic {
+  id              String                    @id @default(cuid())
+  userId          String
+  topicKey        String
+  title           String
+  category        String?
+  primaryPlatform String
+  currentRank     Int
+  currentHeat     Float
+  sourceCount     Int
+  firstObservedAt DateTime                  @default(now())
+  lastObservedAt  DateTime                  @default(now())
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  user            User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  observations    HotspotTrendObservation[]
+
+  @@unique([userId, topicKey])
+  @@index([userId, lastObservedAt])
+}
+
+model HotspotTrendObservation {
+  id                  String            @id @default(cuid())
+  userId              String
+  hotspotTrendTopicId String
+  bucketKey           String
+  heat                Float
+  topicRank           Int
+  sourceCount         Int
+  backendCount        Int
+  bestSourceRank      Int?
+  evidence            Json?
+  observedAt          DateTime          @default(now())
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hotspotTrendTopic   HotspotTrendTopic @relation(fields: [hotspotTrendTopicId], references: [id], onDelete: Cascade)
+
+  @@unique([hotspotTrendTopicId, bucketKey])
+  @@index([userId, observedAt])
+  @@index([userId, hotspotTrendTopicId, observedAt])
 }
 
 model SocialConnection {

@@ -18,6 +18,7 @@ x-app-env: &app-env
   DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
   AITO_EARN_BASE_URL: ${AITO_EARN_BASE_URL:-https://aitoearn.cn}
   FIRECRAWL_BASE_URL: ${FIRECRAWL_BASE_URL:-https://api.firecrawl.dev}
+  AGENT_REACH_ENABLED: ${AGENT_REACH_ENABLED:-0}
   MEDIA_TEMP_ROOT: /tmp/startrace
   MEDIA_DOWNLOAD_MAX_MB: ${MEDIA_DOWNLOAD_MAX_MB:-500}
   PROVIDER_TIMEOUT_MS: ${PROVIDER_TIMEOUT_MS:-30000}

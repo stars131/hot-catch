@@ -23,6 +23,56 @@ const hotspotPayload = {
   },
 };
 
+const trendPayload = {
+  ...hotspotPayload,
+  topics: [{
+    id: "trend-e2e",
+    title: "AI 助手进入真实工作流",
+    category: "科技与AI",
+    platform: "微博",
+    heat: 76,
+    change: 90,
+    status: "爆发中",
+    predictedPeak: 80,
+    peakEta: "持续 2 天",
+    notes: 2,
+    engagement: "12万",
+    creators: "2 个平台 / 2 个后端",
+    related: 2,
+    trend: [40, 80, 76],
+    trendEvidence: trendEvidence("24h", 24, 90, 23, "爆发中", [40, 80, 76]),
+    trendWindows: {
+      "1h": trendEvidence("1h", 1, -5, -2, "回落", [80, 80, 76]),
+      "24h": trendEvidence("24h", 24, 90, 23, "爆发中", [40, 80, 76]),
+      "7d": trendEvidence("7d", 168, 90, 23, "爆发中", [40, 80, 76]),
+    },
+    platformShare: [{ label: "微博", value: 60, color: "#b91c1c" }, { label: "知乎", value: 40, color: "#2563eb" }],
+    angles: [{ title: "事实梳理 + 时间线", description: "只根据已确认来源梳理变化。", heat: 72, status: "上升" }],
+    riskNotes: ["发布前复核来源。"],
+    keywords: ["AI 助手", "工作流"],
+    sources: [{ id: "source-1", title: "AI 助手进入真实工作流", url: "https://example.com/trend", score: 100, rawScore: "100", desc: "", platform: "微博", platformCode: "weibo", rank: 3, backend: "e2e" }],
+  }],
+  summary: { ...hotspotPayload.summary, totalItems: 1, activeSources: 1 },
+};
+
+function trendEvidence(window: "1h" | "24h" | "7d", windowHours: number, heatChangePercent: number, rankChange: number, status: string, points: number[]) {
+  return {
+    dataState: "observed",
+    window,
+    windowHours,
+    observationCount: points.length,
+    firstObservedAt: "2026-07-18T12:00:00.000Z",
+    lastObservedAt: "2026-07-20T12:00:00.000Z",
+    heatChangePercent,
+    rankChange,
+    observedPeak: 80,
+    isNew: false,
+    durationLabel: "持续 2 天",
+    status,
+    points,
+  };
+}
+
 test("创作页只保留一层主导航", async ({ page }) => {
   await page.goto("/creator/xiaohongshu");
   await expect(page.getByRole("heading", { level: 1, name: "小红书创作" })).toBeVisible();
@@ -41,7 +91,7 @@ test("热点结果在当前浏览器会话复用，手动刷新才重新请求",
   await page.goto("/hotspots");
   await expect(page.getByText("当前筛选没有热点")).toBeVisible();
   expect(hotspotRequests).toBe(1);
-  await expect.poll(async () => page.evaluate(() => Boolean(sessionStorage.getItem("startrace:hotspots:v1")))).toBe(true);
+  await expect.poll(async () => page.evaluate(() => Boolean(sessionStorage.getItem("startrace:hotspots:v2")))).toBe(true);
 
   await page.goto("/hotspots?visit=2", { waitUntil: "domcontentloaded" });
   await expect(page.getByText("当前筛选没有热点")).toBeVisible({ timeout: 30_000 });
@@ -49,6 +99,39 @@ test("热点结果在当前浏览器会话复用，手动刷新才重新请求",
 
   await page.getByRole("button", { name: "刷新", exact: true }).click();
   await expect.poll(() => hotspotRequests).toBe(2);
+});
+
+test("热点时间窗口展示真实观测变化", async ({ page }) => {
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  await page.route("**/api/hotspots*", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(trendPayload) });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/hotspots");
+
+  await expect(page.getByRole("heading", { level: 1, name: "热点研究" })).toBeVisible();
+  await expect(page.getByText("Unhandled Runtime Error")).toHaveCount(0);
+  await expect(page.getByRole("columnheader", { name: "24小时变化" })).toBeVisible();
+  await expect(page.getByRole("table").getByText("+90%", { exact: true })).toBeVisible();
+  await expect(page.getByText("变化仅根据星迹保存的历史快照计算。", { exact: false })).toBeVisible();
+  await expect.poll(async () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.getByRole("table").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(os.tmpdir(), "startrace-hotspot-history-desktop.png") });
+
+  await page.getByRole("button", { name: "1小时", exact: true }).first().click();
+  await expect(page.getByRole("columnheader", { name: "1小时变化" })).toBeVisible();
+  await expect(page.getByRole("table").getByText("-5%", { exact: true })).toBeVisible();
+  await expect(page.getByText("下降 2 位", { exact: true })).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator("article").getByText("-5%", { exact: true })).toBeVisible();
+  await expect.poll(async () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.locator("article").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(os.tmpdir(), "startrace-hotspot-history-mobile.png") });
+  expect(consoleErrors).toEqual([]);
 });
 
 test("人设创建和修改使用逐步问答", async ({ page }) => {

@@ -144,13 +144,13 @@ export function CreatorComposer(props: {
   const canSend = props.value.trim().length > 0 && !props.busy;
 
   return (
-    <div ref={rootRef} className="mx-auto w-full max-w-3xl">
+    <div ref={rootRef} className="mx-auto w-full max-w-4xl">
       {props.chips.length > 0 || selectedSkills.length > 0 ? (
         <div className="mb-2 flex flex-wrap gap-1.5" data-testid="composer-chips">
           {props.chips.map((chip) => (
             <span
               key={chip.id}
-              className="inline-flex max-w-full items-center gap-1 rounded-lg border border-[#DDD7CE] bg-[#FFFDF9] py-1 pl-2.5 pr-1 text-xs text-[#1F1D19]"
+              className="inline-flex max-w-full items-center gap-1 rounded-md border bg-card py-1 pl-2.5 pr-1 text-xs text-foreground"
             >
               <span className="truncate">
                 {chip.kind === "idea" ? "选题：" : chip.kind === "patch" ? "修改：" : chip.kind === "account" ? "账号：" : chip.kind === "persona" ? "人设：" : chip.kind === "reference" ? "参考：" : "作品："}
@@ -158,7 +158,7 @@ export function CreatorComposer(props: {
               </span>
               <button
                 type="button"
-                className="rounded p-0.5 text-[#746F67] hover:bg-[#EDE9E0] hover:text-[#1F1D19]"
+                className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
                 onClick={() => props.onRemoveChip(chip.id)}
                 aria-label={`移除上下文 ${chip.label}`}
               >
@@ -169,13 +169,13 @@ export function CreatorComposer(props: {
           {selectedSkills.map((skill) => (
             <span
               key={skill.id}
-              className="inline-flex max-w-full items-center gap-1 rounded-lg border border-[#DDD7CE] bg-[#FFFDF9] py-1 pl-2.5 pr-1 text-xs text-[#1F1D19]"
+              className="inline-flex max-w-full items-center gap-1 rounded-md border bg-card py-1 pl-2.5 pr-1 text-xs text-foreground"
               data-testid={`selected-skill-${skill.id}`}
             >
               <span className="truncate">Skill：{skill.name}</span>
               <button
                 type="button"
-                className="rounded p-0.5 text-[#746F67] hover:bg-[#EDE9E0] hover:text-[#1F1D19]"
+                className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
                 onClick={() => props.onToggleSkill(skill.id)}
                 aria-label={`移除 Skill：${skill.name}`}
               >
@@ -186,7 +186,7 @@ export function CreatorComposer(props: {
         </div>
       ) : null}
 
-      <div className="relative overflow-visible rounded-lg border border-[#D8D1C7] bg-[#FFFDF9] shadow-[0_2px_10px_rgba(31,29,25,0.05)] transition-[border-color,box-shadow] focus-within:border-[#879C8C] focus-within:shadow-[0_0_0_3px_rgba(102,128,109,0.13),0_5px_18px_rgba(31,29,25,0.07)]">
+      <div className="relative overflow-visible rounded-[18px] border border-foreground/25 bg-card shadow-float transition-[border-color] duration-short focus-within:border-input focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background">
         {mentionMatch && mentionItems.length ? (
           <div className="absolute inset-x-0 bottom-full mb-2 max-h-72 overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-md" role="listbox" aria-label="引用建议">
             {mentionItems.map((item) => (
@@ -221,12 +221,12 @@ export function CreatorComposer(props: {
             }
           }}
           rows={1}
-          placeholder="说说你想创作的主题、素材或修改要求…"
+          placeholder="告诉星迹你想创作什么…"
           aria-label="创作输入框"
-          className="block min-h-[58px] w-full resize-none bg-transparent px-4 py-3.5 text-[15px] leading-6 text-[#1F1D19] outline-none placeholder:text-[#8B857C] focus-visible:ring-0 focus-visible:ring-offset-0"
+          className="block min-h-[66px] w-full resize-none bg-transparent px-4 py-4 text-[15px] leading-6 text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 sm:px-5"
         />
 
-        <div className="relative flex min-h-11 items-center gap-1 border-t border-[#ECE7DF] px-2 py-1.5">
+        <div className="relative flex min-h-12 items-center gap-1 border-t px-2 py-1.5 sm:px-3">
           {/* + 菜单:技能来自内置 Skill Registry;未实现能力明确标注,不假装成功 */}
           {props.showPlatformSwitcher !== false ? <div className="relative">
             <Button
@@ -234,7 +234,7 @@ export function CreatorComposer(props: {
               type="button"
               variant="ghost"
               size="icon"
-              className="rounded-lg text-[#746F67] hover:bg-[#EDE9E0] hover:text-[#1F1D19]"
+              className="text-muted-foreground hover:bg-muted hover:text-foreground"
               aria-label="添加资料或技能"
               aria-expanded={plusOpen}
               onClick={() => {
@@ -369,8 +369,8 @@ export function CreatorComposer(props: {
               className={cn(
                 "flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm transition-colors",
                 platformOpen
-                  ? "bg-[#EDF4EE] text-[#476451]"
-                  : "text-[#1F1D19] hover:bg-[#F1EEE8]",
+                  ? "bg-muted text-foreground"
+                  : "text-foreground hover:bg-muted",
               )}
               aria-expanded={platformOpen}
               aria-label="选择平台"
@@ -381,7 +381,7 @@ export function CreatorComposer(props: {
               }}
             >
               {PLATFORM_LABEL[props.platform]}
-              <ChevronDown className="h-3.5 w-3.5 text-[#746F67]" />
+              <ChevronDown className="size-3.5 text-muted-foreground" />
             </button>
             {platformOpen ? (
               <div className="absolute bottom-11 left-0 z-20 w-40 rounded-xl border border-[#DDD7CE] bg-[#FFFDF9] p-1.5 shadow-[0_8px_24px_rgba(31,29,25,0.12)]">
@@ -412,12 +412,12 @@ export function CreatorComposer(props: {
           <Button
             type="button"
             size="icon"
-            className="ml-auto rounded-full bg-[#355642] text-white shadow-none hover:bg-[#294836] disabled:bg-[#CFCBC3] disabled:text-[#8D887F] disabled:opacity-100"
+            className="ml-auto rounded-md shadow-none"
             disabled={!canSend}
             onClick={props.onSend}
             aria-label="发送"
           >
-            <Send className="h-4 w-4" />
+            <Send />
           </Button>
         </div>
       </div>

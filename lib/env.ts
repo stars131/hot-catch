@@ -27,6 +27,7 @@ const envSchema = z.object({
   AITO_EARN_BASE_URL: z.string().url().default("https://aitoearn.cn"),
   PUBLISH_PROVIDER_MODE: z.enum(["mock", "real"]).optional(),
   FIRECRAWL_BASE_URL: z.string().url().default("https://api.firecrawl.dev"),
+  AGENT_REACH_ENABLED: z.enum(["0", "1"]).default("0"),
   PROVIDER_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
   XHS_FETCH_PROVIDER: z.enum(["mock", "third_party", "public_page"]).default("mock"),
   XHS_THIRD_PARTY_API_KEY: z.string().optional().default(""),

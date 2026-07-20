@@ -181,9 +181,10 @@ export function CreatorAgentWorkspace({
       staleTime: 5 * 60 * 1000,
     })
       .then((data) => setSkills(data.skills))
-      .catch((error: unknown) =>
-        toast.error(error instanceof Error ? error.message : "Skill 列表加载失败"),
-      );
+      .catch(() => {
+        // Skill 列表属于增强能力，加载失败时保留基础创作流程。
+        setSkills([]);
+      });
   }, [queryClient]);
 
   useEffect(() => {
@@ -644,29 +645,33 @@ export function CreatorAgentWorkspace({
     conversations.find((conversation) => conversation.id === conversationId)?.title ?? null;
 
   const topbar = (
-    <div className="flex min-w-0 items-center gap-2">
-      <h1 className="truncate text-sm font-semibold tracking-tight">
+    <div className="flex min-w-0 items-center gap-3">
+      <span className="font-mono-metric hidden shrink-0 text-[9px] uppercase tracking-[0.16em] text-muted-foreground sm:inline">
+        WORKBENCH
+      </span>
+      <span aria-hidden="true" className="hidden h-4 border-l sm:block" />
+      <h1 className="truncate text-sm font-semibold tracking-[-0.015em]">
         {threadState === "ready" && conversationTitle
           ? conversationTitle
           : global
             ? "多平台创作"
             : `${PLATFORM_LABEL[platform]}创作`}
       </h1>
-      <span className="shrink-0 rounded-lg border border-[#DDD7CE] bg-[#FFFDF9] px-1.5 py-0.5 text-[11px] text-[#746F67]">
+      <span className="font-mono-metric shrink-0 text-[9px] uppercase tracking-[0.12em] text-muted-foreground">
         {global ? "对话工作台" : PLATFORM_LABEL[platform]}
       </span>
       {busy ? (
-        <span className="shrink-0 text-[11px] text-[#C83B32]">生成中</span>
+        <span className="shrink-0 text-[11px] font-medium text-primary">生成中</span>
       ) : null}
       {lastArtifactContentId && !artifactContentId ? (
         <Button
           size="sm"
           variant="outline"
-          className="ml-auto h-7 shrink-0 rounded-lg border-[#DDD7CE] px-2 text-[11px]"
+          className="ml-auto h-8 shrink-0 px-2 text-[11px]"
           onClick={() => setArtifactContentId(lastArtifactContentId)}
           data-testid="topbar-open-artifact"
         >
-          <FileText className="h-3.5 w-3.5" /> 打开作品
+          <FileText data-icon="inline-start" /> 打开作品
         </Button>
       ) : null}
     </div>
