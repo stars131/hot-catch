@@ -24,11 +24,17 @@ export function CreatorShell(props: {
   onDrawerOpenChange: (open: boolean) => void;
 }) {
   return (
-    <div className="flex h-dvh min-h-0 bg-[#F4F1EA] text-[#1F1D19]">
+    <div className="flex h-dvh min-h-0 bg-background text-foreground">
+      <a
+        href="#conversation-scroll-root"
+        className="sr-only z-50 rounded-md bg-card px-3 py-2 focus:not-sr-only focus:fixed focus:left-3 focus:top-3"
+      >
+        跳到创作对话
+      </a>
       {/* 桌面常驻侧栏 */}
       <aside
         className={cn(
-          "hidden h-full shrink-0 flex-col border-r border-[#DDD7CE] bg-[#F5F4F1] transition-[width] duration-200 min-[1180px]:flex",
+          "hidden h-full shrink-0 flex-col border-r bg-rail transition-[width] duration-short ease-editorial min-[1180px]:flex",
           props.sidebarCollapsed ? "w-0 overflow-hidden border-r-0" : "w-[248px]",
         )}
       >
@@ -36,7 +42,7 @@ export function CreatorShell(props: {
       </aside>
 
       <div className="flex h-full min-w-0 flex-1 flex-col">
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b border-[#DDD7CE] bg-[#F4F1EA]/95 px-3">
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b bg-background/95 px-3 backdrop-blur-md sm:px-4">
           {/* 窄屏:会话栏 Drawer */}
           <Sheet open={props.drawerOpen} onOpenChange={props.onDrawerOpenChange}>
             <SheetTrigger asChild>
@@ -51,7 +57,7 @@ export function CreatorShell(props: {
             </SheetTrigger>
             <SheetContent
               side="left"
-              className="w-[280px] border-[#DDD7CE] bg-[#F5F4F1] p-0"
+              className="w-[min(88vw,304px)] bg-rail p-0"
             >
               <SheetTitle className="sr-only">会话列表</SheetTitle>
               {props.sidebar}
@@ -77,9 +83,9 @@ export function CreatorShell(props: {
           <LanguageSwitcher />
         </header>
 
-        <main id="conversation-scroll-root" className="min-h-0 flex-1 overflow-y-auto">{props.children}</main>
+        <main id="conversation-scroll-root" className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{props.children}</main>
 
-        <div className="shrink-0 border-t border-[#DDD7CE] bg-[#F4F1EA] px-3 pb-[max(calc(env(safe-area-inset-bottom)+64px),76px)] pt-3 lg:pb-[max(env(safe-area-inset-bottom),12px)]">
+        <div className="shrink-0 bg-background/95 px-3 pb-[max(env(safe-area-inset-bottom),12px)] pt-3 backdrop-blur-md sm:px-5 sm:pt-4">
           {props.composer}
         </div>
       </div>
@@ -87,11 +93,11 @@ export function CreatorShell(props: {
       {props.artifact ? (
         <section
           className={cn(
-            "min-h-0 bg-[#FFFDF9]",
+            "min-h-0 bg-card",
             // <1180px:全屏覆盖主区(手机一次只显示对话或 Artifact)
             "fixed inset-0 z-40 flex flex-col",
             // ≥1180px:回到文档流,作为右侧栏
-            "min-[1180px]:static min-[1180px]:z-auto min-[1180px]:w-[560px] min-[1180px]:shrink-0 min-[1180px]:border-l min-[1180px]:border-[#DDD7CE] min-[1440px]:w-[640px]",
+            "min-[1180px]:static min-[1180px]:z-auto min-[1180px]:w-[560px] min-[1180px]:shrink-0 min-[1180px]:border-l min-[1440px]:w-[640px]",
           )}
           data-testid="artifact-panel-container"
         >

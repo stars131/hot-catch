@@ -6,6 +6,11 @@ import type { JobHandler } from "@/lib/jobs/types";
 import { prisma } from "@/lib/prisma";
 import { TikHubProvider } from "@/lib/providers/tikhub/provider";
 import { FirecrawlProvider } from "@/lib/providers/firecrawl/provider";
+import {
+  AgentReachWebProvider,
+  probeAgentReachWebChannel,
+} from "@/lib/providers/agent-reach/provider";
+import { runOrderedBackends } from "@/lib/providers/ordered-backend-router";
 import type { SocialAccount, SocialContent } from "@/lib/providers/types";
 import { loadCredential } from "@/lib/services/credential-service";
 import { assertUrlSafe, extractHtmlSummary, safeFetchText } from "@/lib/security/url-guard";
@@ -234,7 +239,12 @@ async function importWebReference(
     return { resultType: "idea", resultId: existing.id, output: { deduplicated: true } };
   }
 
-  let extracted: { title?: string; markdown: string; metadata: Record<string, unknown>; method: "firecrawl" | "basic_fetch" };
+  type WebExtraction = {
+    title?: string;
+    markdown: string;
+    metadata: Record<string, unknown>;
+  };
+
   let credential: Record<string, string> | null = null;
   try {
     credential = await loadCredential(userId, CredentialProvider.firecrawl);
@@ -242,35 +252,86 @@ async function importWebReference(
     if (!isAppError(error) || error.code !== "CREDENTIAL_NOT_CONFIGURED") throw error;
   }
 
-  try {
-    if (credential) {
-      const apiKey = credential.apiKey ?? credential.token;
-      if (!apiKey) throw new AppError("CREDENTIAL_INVALID", "Firecrawl 凭证缺少 apiKey。", 422);
-      await reportProgress(35, "使用 Firecrawl 提取公开页面");
-      const result = await new FirecrawlProvider(apiKey, credential.baseUrl).importUrl(url);
-      extracted = { title: result.title, markdown: result.markdown, metadata: result.metadata, method: "firecrawl" };
-    } else {
-      await reportProgress(35, "安全抓取公开页面");
-      const fetched = await safeFetchText(url);
-      const summary = extractHtmlSummary(fetched.text);
-      if (!summary.text) throw new Error("empty public page");
-      extracted = {
-        title: summary.title || undefined,
-        markdown: summary.text,
-        metadata: { fetchedFrom: fetched.finalUrl, truncated: fetched.truncated, method: "basic_fetch" },
-        method: "basic_fetch",
-      };
-    }
-  } catch (error) {
-    if (isAppError(error) && error.code === "CREDENTIAL_INVALID") throw error;
+  const firecrawlApiKey = credential?.apiKey ?? credential?.token;
+  let agentReachBackend: string | null = null;
+  const routed = await runOrderedBackends<WebExtraction>([
+    {
+      id: "firecrawl",
+      availability: firecrawlApiKey
+        ? { available: true }
+        : {
+            available: false,
+            reason: credential ? "CREDENTIAL_INVALID" : "CREDENTIAL_NOT_CONFIGURED",
+          },
+      failureReason: "PROVIDER_UNAVAILABLE",
+      run: async () => {
+        await reportProgress(35, "使用 Firecrawl 提取公开页面");
+        const result = await new FirecrawlProvider(
+          firecrawlApiKey!,
+          credential?.baseUrl || undefined,
+        ).importUrl(url);
+        return {
+          title: result.title,
+          markdown: result.markdown,
+          metadata: result.metadata ?? {},
+        };
+      },
+    },
+    {
+      id: "agent_reach_web",
+      availability: async () => {
+        const status = await probeAgentReachWebChannel();
+        if (!status.available) return status;
+        agentReachBackend = status.activeBackend;
+        return { available: true };
+      },
+      failureReason: "AGENT_REACH_UPSTREAM_UNAVAILABLE",
+      run: async () => {
+        await reportProgress(35, "使用 Agent Reach 读取公开页面");
+        const result = await new AgentReachWebProvider(
+          agentReachBackend ?? "Jina Reader",
+        ).importUrl(url);
+        return {
+          title: result.title,
+          markdown: result.markdown,
+          metadata: result.metadata ?? {},
+        };
+      },
+    },
+    {
+      id: "basic_fetch",
+      failureReason: "PUBLIC_PAGE_UNAVAILABLE",
+      run: async () => {
+        await reportProgress(35, "安全抓取公开页面");
+        const fetched = await safeFetchText(url);
+        const summary = extractHtmlSummary(fetched.text);
+        if (!summary.text) throw new Error("empty public page");
+        return {
+          title: summary.title || undefined,
+          markdown: summary.text,
+          metadata: {
+            fetchedFrom: fetched.finalUrl,
+            truncated: fetched.truncated,
+            method: "basic_fetch",
+          },
+        };
+      },
+    },
+  ]);
+
+  if (!routed.ok) {
     return {
       finalStatus: "waiting_input" as const,
       output: {
         reason: "PUBLIC_REFERENCE_BLOCKED",
         message: "公开页面拒绝访问或未提取到正文。请粘贴你有权使用的摘要后继续；系统不会虚构来源内容。",
+        backendAttempts: routed.attempts,
       },
     };
   }
+
+  const extracted = routed.value;
+  const fallbackUsed = routed.attempts.some((attempt) => attempt.status === "failed");
 
   const idea = await prisma.idea.create({
     data: {
@@ -282,16 +343,26 @@ async function importWebReference(
       evidence: {
         sourceUrl: url,
         platform,
-        importedBy: extracted.method,
+        importedBy: routed.activeBackend,
         usage: "current_user_inference_only",
         ...(platform === "reddit"
           ? { policyNote: "Reddit content is not used for model training or cross-user datasets." }
           : {}),
-        metadata: extracted.metadata,
+        metadata: {
+          ...extracted.metadata,
+          sourceRoute: {
+            activeBackend: routed.activeBackend,
+            attempts: routed.attempts,
+          },
+        },
         markdown: extracted.markdown.slice(0, 50000),
       } as Prisma.InputJsonValue,
     },
   });
   await reportProgress(90, "保存参考资料");
-  return { resultType: "idea", resultId: idea.id };
+  return {
+    resultType: "idea",
+    resultId: idea.id,
+    output: { activeBackend: routed.activeBackend, fallbackUsed },
+  };
 }
