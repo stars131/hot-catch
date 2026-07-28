@@ -36,12 +36,30 @@ for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
     Tee-Object -FilePath $attemptLog
   $claudeExitCode = $LASTEXITCODE
   $ErrorActionPreference = $previousErrorActionPreference
+  $claudeResult = $null
+  $attemptOutput = Get-Content -LiteralPath $attemptLog -Raw
+  $resultMatch = [regex]::Match(
+    $attemptOutput,
+    '(?m)^\{"type":"result".*$'
+  )
+  if ($resultMatch.Success) {
+    try {
+      $claudeResult = $resultMatch.Value | ConvertFrom-Json
+    } catch {
+      Write-Warning "Claude Code result JSON could not be parsed."
+    }
+  }
+  $claudeReportedError = (
+    $null -eq $claudeResult -or
+    $claudeResult.is_error -eq $true
+  )
   $platformProjectWritten = Select-String `
     -LiteralPath "prisma\schema.prisma" `
     -Pattern "^model PlatformProject \{" `
     -Quiet
 
   Write-Host "Claude Code exit code: $claudeExitCode"
+  Write-Host "Claude Code reported an error: $claudeReportedError"
   git status --short
 
   if ($platformProjectWritten) {
@@ -49,7 +67,7 @@ for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
     exit $claudeExitCode
   }
 
-  if ($claudeExitCode -eq 0) {
+  if ($claudeExitCode -eq 0 -and -not $claudeReportedError) {
     Write-Host "Claude Code completed without the expected schema marker. Stopping for supervisor review."
     exit 0
   }
