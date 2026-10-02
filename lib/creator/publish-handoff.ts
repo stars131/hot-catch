@@ -2,6 +2,8 @@ import { PublishStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/lib/errors";
 import { getAiToEarnConnectionStatus } from "@/lib/services/connection-service";
+import { deploymentSecretLiterals } from "@/lib/content/outbound-guard-server";
+import { referenceTextsOf } from "@/lib/content/reference-overlap";
 import type {
   CardAction,
   ChatCard,
@@ -98,6 +100,15 @@ async function loadContentWithLatestRevision(userId: string, contentId: string) 
   return { content, latest: content.revisions[0] ?? null };
 }
 
+async function referenceTextsForContent(userId: string, contentId: string): Promise<string[]> {
+  const references = await prisma.contentReference.findMany({
+    where: { userId, contentId },
+    select: { snapshot: true },
+    take: 10,
+  });
+  return references.flatMap((reference) => referenceTextsOf(reference.snapshot));
+}
+
 /** 组装就绪卡的检查项:内容检查 + 供应商连接 + 在途发布记录提醒。 */
 async function collectReadiness(params: {
   userId: string;
@@ -126,6 +137,8 @@ async function collectReadiness(params: {
     body: params.bodyText ?? "",
     structured,
     fallbackTags: params.fallbackTags,
+    secretLiterals: deploymentSecretLiterals(),
+    referenceTexts: await referenceTextsForContent(params.userId, params.contentId),
   });
   const connection = await getAiToEarnConnectionState(params.userId);
   const items: ReadinessItem[] = [...assessment.items, connectionItem(connection)];

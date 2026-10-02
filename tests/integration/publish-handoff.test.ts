@@ -431,3 +431,39 @@ describe("跨用户越权", () => {
     expect(attempt.assistantMessage!.content).toContain("不属于当前账号");
   });
 });
+
+describe("出站闸门与参考重合进入就绪卡", () => {
+  it("密钥泄露让就绪卡阻塞且不给确认动作;照搬参考原文给出重合提醒", async () => {
+    const copied = "第一步每天记录三件事大概花五分钟然后每周日花三十分钟归纳重复出现的问题";
+    const { content } = await seedContent({
+      userId: userAId,
+      conversationId: convAId,
+      bodyText: `${copied}。接口密钥:Zx81kd0QpLmnB7`,
+      tag: "guard",
+    });
+    await prisma.contentReference.create({
+      data: {
+        userId: userAId,
+        contentId: content.id,
+        role: "structure",
+        fingerprint: `guard-${runId}`,
+        snapshot: { version: 1, summary: copied, structure: [], corePoints: [], facts: [] },
+      },
+    });
+    const reply = await buildPublishReadinessReply({
+      userId: userAId,
+      contentId: content.id,
+      cardIdSuffix: `g-${runId.slice(-6)}`,
+    });
+    const card = reply.cards.find(
+      (item): item is PublishReadinessCard => item.type === "publish_readiness",
+    )!;
+    const outbound = card.items.find((item) => item.key === "outbound");
+    const overlap = card.items.find((item) => item.key === "reference.overlap");
+    expect(card.state).toBe("blocked");
+    expect(outbound?.level).toBe("block");
+    expect(outbound?.detail).not.toContain("Zx81kd0QpLmnB7");
+    expect(overlap?.level).toBe("warn");
+    expect(card.actions.some((action) => action.actionId === "publish.confirm_handoff")).toBe(false);
+  });
+});

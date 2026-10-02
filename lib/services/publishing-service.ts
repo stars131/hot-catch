@@ -6,6 +6,8 @@ import {
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { AppError, isAppError } from "@/lib/errors";
+import type { GuardField } from "@/lib/content/outbound-guard";
+import { assertOutboundContentSafe } from "@/lib/content/outbound-guard-server";
 import { resolvePublishProviderMode, type PublishProviderMode } from "@/lib/env";
 import { AiToEarnProvider } from "@/lib/providers/aitoearn/provider";
 import { MockAiToEarnProvider } from "@/lib/providers/aitoearn/mock-provider";
@@ -116,6 +118,8 @@ export async function preparePublishRecord(
   const bodyWithTags = [bodyText, content.tags.map((tag) => `#${tag}`).join(" ")]
     .filter(Boolean)
     .join("\n\n");
+  // 公开发布无法撤回:实际提交的标题与正文先过出站闸门,命中 block 级直接拒绝
+  assertOutboundContentSafe(publishedTextFields(title, bodyWithTags));
   const media = input.assets.map((asset) => ({
     url: asset.url,
     metadata: { type: asset.type },
@@ -197,6 +201,8 @@ export async function submitPublishRecord(userId: string, localRecordId: string)
         remote = await provider.retry(local.providerRecordId);
       }
     } else {
+      // 首次提交前复查落库载荷:覆盖定时发布与闸门上线前创建的记录
+      assertOutboundContentSafe(payloadTextFields(local.requestPayload));
       remote = await provider.createFlow({
         platform: local.platform,
         accountId: local.providerAccountId ?? "",
@@ -368,6 +374,28 @@ export async function cancelPublishRecord(userId: string, localRecordId: string)
     data: { status: "canceled", lastSyncedAt: new Date() },
   });
   return getPublishRecord(userId, local.id);
+}
+
+function publishedTextFields(title: string, body: string): GuardField[] {
+  return [
+    { field: "title", label: "标题", text: title },
+    { field: "body", label: "正文与话题", text: body },
+  ];
+}
+
+function payloadTextFields(payload: Prisma.JsonValue): GuardField[] {
+  const content =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>).content
+      : null;
+  const record =
+    content && typeof content === "object" && !Array.isArray(content)
+      ? (content as Record<string, unknown>)
+      : {};
+  return publishedTextFields(
+    typeof record.title === "string" ? record.title : "",
+    typeof record.body === "string" ? record.body : "",
+  );
 }
 
 function toJson(value: unknown): Prisma.InputJsonValue | undefined {

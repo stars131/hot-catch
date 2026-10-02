@@ -59,3 +59,30 @@ independently for this project's cloud service and credential boundaries.
 No TrendRadar source file is copied into this repository. The PostgreSQL data
 model, TypeScript trend calculations, API integration, and React presentation
 were implemented independently for STARTRACE's per-user cloud architecture.
+
+## Easel
+
+- Project: [ZJU-REAL/Easel](https://github.com/ZJU-REAL/Easel)
+- Source revision reviewed: `cfa17a6`
+- License: Apache License 2.0
+- License copy: `licenses/Easel-APACHE-2.0.txt`
+- Referenced concepts: a deterministic outbound content gate that blocks
+  leaked secrets and internal configuration before publishing while only
+  warning on context-dependent wording, masked finding excerpts, exact matching
+  of deployment secret values, and social-media unit counting (one CJK
+  character, English word or number group per unit).
+
+No Easel source file is copied into this repository. The TypeScript guard,
+reference overlap measurement, readiness integration and publish enforcement
+were implemented independently for STARTRACE.
+
+## gitleaks
+
+- Project: [gitleaks/gitleaks](https://github.com/gitleaks/gitleaks)
+- Source revision reviewed: `b58d3f1`
+- License: MIT License
+- License copy: `licenses/gitleaks-MIT.txt`
+- Referenced material: credential formats from `config/gitleaks.toml`
+  (Anthropic, OpenAI-style, GitHub, AWS, Google, Slack, JWT and private-key
+  rules), narrowed and rewritten as JavaScript regular expressions in
+  `lib/content/outbound-guard.ts`.

@@ -9,6 +9,7 @@ export async function readApiJson<T>(response: Response): Promise<T> {
     Object.assign(error, {
       code: data.error?.code,
       messageKey: data.error?.messageKey,
+      details: data.error?.details,
       status: response.status,
     });
     throw error;

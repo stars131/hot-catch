@@ -21,6 +21,7 @@ import {
   readinessStateLabel,
   type ReadinessItem,
 } from "@/lib/creator/publish-readiness";
+import { referenceTextsOf } from "@/lib/content/reference-overlap";
 import type { ArtifactDraft } from "@/hooks/creator/use-artifact";
 
 type ConnectionState = "connected" | "missing" | "invalid" | "loading" | "unknown";
@@ -77,6 +78,8 @@ export function PublishChecklist(props: {
   platform: "xiaohongshu" | "douyin";
   draft: ArtifactDraft;
   fallbackTags: string[];
+  /** 参考作品快照(ReferenceBrief),用于检查逐字重合 */
+  referenceSnapshots: unknown[];
   revisionNumber: number | null;
   dirty: boolean;
   previewing: boolean;
@@ -96,8 +99,9 @@ export function PublishChecklist(props: {
         body: props.draft.body,
         structured: props.draft.structured,
         fallbackTags: props.fallbackTags,
+        referenceTexts: props.referenceSnapshots.flatMap(referenceTextsOf),
       }),
-    [props.contentKind, props.draft, props.fallbackTags],
+    [props.contentKind, props.draft, props.fallbackTags, props.referenceSnapshots],
   );
 
   useEffect(() => {
