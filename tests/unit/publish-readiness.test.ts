@@ -59,6 +59,7 @@ describe("小红书图文就绪检查", () => {
       "pages",
       "tags",
       "risk",
+      "outbound",
     ]);
   });
 
@@ -145,6 +146,7 @@ describe("抖音脚本就绪检查", () => {
       "caption",
       "tags",
       "risk",
+      "outbound",
     ]);
   });
 

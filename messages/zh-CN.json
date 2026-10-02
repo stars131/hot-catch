@@ -180,6 +180,8 @@
     "scheduledCreated": "定时发布任务已创建",
     "submitted": "发布任务已提交",
     "submitFailed": "发布提交失败",
+    "guardBlocked": "发布已拦截：内容中有不应公开的信息",
+    "guardBlockedRecord": "内容中有不应公开的信息，系统没有提交给发布服务。请在编辑器中修改后重新发起发布。",
     "requeued": "已重新进入发布队列",
     "canceledToast": "发布已取消",
     "actionFailed": "发布操作失败",

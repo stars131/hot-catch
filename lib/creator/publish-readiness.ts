@@ -1,4 +1,6 @@
 import { validateStoryboard, formatSeconds } from "@/lib/content/storyboard";
+import { outboundFieldsOf, scanOutboundText } from "@/lib/content/outbound-guard";
+import { measureReferenceOverlap } from "@/lib/content/reference-overlap";
 
 /**
  * C8 发布就绪评估(纯函数,无数据库、无网络)。
@@ -33,6 +35,10 @@ export type ReadinessInput = {
   structured: Record<string, unknown> | null;
   /** structured 中没有 tags 时的兜底(GeneratedContent.tags) */
   fallbackTags?: string[];
+  /** 服务端传入的部署密钥真值,用于出站闸门精确匹配;浏览器端不传 */
+  secretLiterals?: readonly string[];
+  /** 参考作品的原文摘录(来自 ReferenceBrief);有参考时才检查逐字重合 */
+  referenceTexts?: string[];
 };
 
 export type ReadinessAssessment = {
@@ -152,6 +158,77 @@ function riskItem(input: ReadinessInput, extraTexts: string[]): ReadinessItem {
   return { key: "risk", label: "风险表述", level: "warn", detail: details.join(" ") };
 }
 
+/** 对话卡协议限制 detail ≤ 500 字,动态拼接的说明在这里截断 */
+function clampDetail(detail: string): string {
+  return detail.length > 480 ? `${detail.slice(0, 479)}…` : detail;
+}
+
+const OVERLAP_COVERAGE_WARN = 0.2;
+const OVERLAP_RUN_WARN = 20;
+
+/** 参考原文逐字重合:只提醒,参考可能是用户本人作品。 */
+function referenceOverlapItem(input: ReadinessInput, fields: string[]): ReadinessItem | null {
+  if (!input.referenceTexts?.length) return null;
+  const overlap = measureReferenceOverlap(fields, input.referenceTexts);
+  const percent = Math.round(overlap.coverage * 100);
+  if (overlap.coverage < OVERLAP_COVERAGE_WARN && overlap.longestRun < OVERLAP_RUN_WARN) {
+    return {
+      key: "reference.overlap",
+      label: "参考原文重合",
+      level: "pass",
+      detail:
+        overlap.longestRun > 0
+          ? `与参考原文逐字重合约 ${percent}%,最长连续 ${overlap.longestRun} 字。`
+          : "未发现与参考原文逐字重合的段落。",
+    };
+  }
+  return {
+    key: "reference.overlap",
+    label: "参考原文重合",
+    level: "warn",
+    detail: clampDetail(
+      `约 ${percent}% 的文字与参考原文逐字相同,最长连续 ${overlap.longestRun} 字:${overlap.excerpts
+        .slice(0, 2)
+        .map((excerpt) => `「${excerpt}」`)
+        .join("")}。建议改写成自己的表达;参考是你本人作品时可忽略。`,
+    ),
+  };
+}
+
+/** 出站闸门:密钥、配置名、模板残留为阻塞;助手腔、格式残留、内网地址为提醒。 */
+function draftFieldsOf(input: ReadinessInput) {
+  return outboundFieldsOf({
+    contentKind: input.contentKind,
+    title: input.title,
+    body: input.body,
+    structured: input.structured,
+    tags: input.fallbackTags,
+  });
+}
+
+function outboundItem(input: ReadinessInput): ReadinessItem {
+  const result = scanOutboundText(draftFieldsOf(input), { secretLiterals: input.secretLiterals });
+  if (result.findings.length === 0) {
+    return {
+      key: "outbound",
+      label: "公开信息安全",
+      level: "pass",
+      detail: "未发现密钥、内部配置、模板占位符或助手腔残留。",
+    };
+  }
+  const shown = result.findings
+    .slice(0, 3)
+    .map((finding) => `${finding.fieldLabel}:${finding.hint} ${finding.excerpt}`)
+    .join(" ");
+  const more = result.findings.length > 3 ? ` 另有 ${result.findings.length - 3} 处。` : "";
+  return {
+    key: "outbound",
+    label: "公开信息安全",
+    level: result.blocked ? "block" : "warn",
+    detail: clampDetail(`${shown}${more}`),
+  };
+}
+
 function assessXhs(input: ReadinessInput): ReadinessItem[] {
   const items: ReadinessItem[] = [];
   const title = input.title.trim();
@@ -218,6 +295,7 @@ function assessXhs(input: ReadinessInput): ReadinessItem[] {
 
   items.push(tagItems(input));
   items.push(riskItem(input, pages.map((page) => stringOf(page.body))));
+  items.push(outboundItem(input));
   return items;
 }
 
@@ -308,6 +386,7 @@ function assessDouyin(input: ReadinessInput): ReadinessItem[] {
 
   items.push(tagItems(input));
   items.push(riskItem(input, [hook, ...shots.map((shot) => stringOf(shot.voiceover))]));
+  items.push(outboundItem(input));
   return items;
 }
 
@@ -321,6 +400,13 @@ export function readinessStateOf(items: ReadinessItem[]): ReadinessState {
 export function assessContentReadiness(input: ReadinessInput): ReadinessAssessment {
   const items =
     input.contentKind === "douyin_video_script" ? assessDouyin(input) : assessXhs(input);
+  const overlap = referenceOverlapItem(
+    input,
+    draftFieldsOf(input)
+      .filter((field) => field.field !== "tags")
+      .map((field) => field.text),
+  );
+  if (overlap) items.push(overlap);
   return {
     items,
     state: readinessStateOf(items),

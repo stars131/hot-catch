@@ -180,6 +180,8 @@
     "scheduledCreated": "Scheduled publishing task created.",
     "submitted": "Publishing task submitted.",
     "submitFailed": "Could not submit the publishing task.",
+    "guardBlocked": "Publishing blocked: the content contains information that should not be public",
+    "guardBlockedRecord": "The content contains information that should not be public, so nothing was sent to the publishing service. Edit the content, then start a new publish.",
     "requeued": "Publishing task re-entered the queue.",
     "canceledToast": "Publishing canceled.",
     "actionFailed": "The publishing action failed.",

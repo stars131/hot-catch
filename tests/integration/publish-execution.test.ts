@@ -268,3 +268,48 @@ describe("cross-user isolation and secret hygiene", () => {
     expect(serialized).not.toContain("encryptedpayload");
   });
 });
+
+describe("outbound content guard", () => {
+  it("rejects a revision that would publish a credential, without creating a record", async () => {
+    const leakedKey = "sk-" + "f".repeat(32);
+    const contentId = await seedContent(userAId, "douyin");
+    await createContentRevision(userAId, contentId, {
+      source: "manual",
+      title: "出站闸门验证",
+      bodyText: `配置好 ${leakedKey} 就能直接调用。`,
+      structuredContent: { shots: [] },
+    });
+    const before = await prisma.publishRecord.count({ where: { contentId } });
+    const rejection = preparePublishRecord(
+      userAId,
+      { contentId, accountId: "mock-douyin-active", assets: VIDEO_ASSETS },
+      `guard-prepare-${runId}`,
+    );
+    await expect(rejection).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      statusCode: 422,
+      details: { reason: "outbound_guard", failureCode: "CONTENT_GUARD_BLOCKED" },
+    });
+    await rejection.catch((error) => expect(JSON.stringify(error)).not.toContain(leakedKey));
+    expect(await prisma.publishRecord.count({ where: { contentId } })).toBe(before);
+  });
+
+  it("fails a stored record whose payload leaks a template variable before contacting the provider", async () => {
+    const record = await preparePublishRecord(
+      userAId,
+      { contentId: douyinContentId, accountId: "mock-douyin-active", assets: VIDEO_ASSETS },
+      `guard-submit-${runId}`,
+    );
+    const payload = record.requestPayload as { content: { body: string } };
+    await prisma.publishRecord.update({
+      where: { id: record.id },
+      data: { requestPayload: { ...payload, content: { ...payload.content, body: "适合 {{audience}} 的方法" } } },
+    });
+    const submitted = await submitPublishRecord(userAId, record.id);
+    expect(submitted.status).toBe("failed");
+    expect(submitted.failureCode).toBe("CONTENT_GUARD_BLOCKED");
+    expect(submitted.failureReason).toContain("模板变量");
+    const stored = await prisma.publishRecord.findUniqueOrThrow({ where: { id: record.id } });
+    expect(stored.providerRecordId).toBeNull();
+  });
+});

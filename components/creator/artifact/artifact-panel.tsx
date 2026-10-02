@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Eye, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -76,6 +76,10 @@ export function ArtifactPanel(props: {
   }) => void;
 }) {
   const artifact = useArtifact(props.contentId);
+  const referenceSnapshots = useMemo(
+    () => artifact.content?.references.map((reference) => reference.snapshot) ?? [],
+    [artifact.content?.references],
+  );
   const onDraftChange = props.onDraftChange;
   const [tab, setTab] = useState<ArtifactEditorTab>("content");
   const [insertNotice, setInsertNotice] = useState<string | null>(null);
@@ -316,6 +320,7 @@ export function ArtifactPanel(props: {
               platform={artifact.content.platform as "xiaohongshu" | "douyin"}
               draft={artifact.draft}
               fallbackTags={artifact.content.tags}
+              referenceSnapshots={referenceSnapshots}
               revisionNumber={artifact.viewRevision?.revisionNumber ?? null}
               dirty={artifact.dirty}
               previewing={artifact.previewing}
